@@ -1,0 +1,88 @@
+# progettodatabase
+
+**Un database in C puro, nato da un array di valori contigui e cresciuto fino a un motore con persistenza, indice appreso e memoria semantica.**
+
+Progetto didattico per autodidatti: ogni file è un capitolo autonomo e compilabile, verificato con test automatici e **numeri misurati contro la teoria** — mai promessi, sempre misurati. Zero librerie esterne: solo C11 e la stdlib. La storia è per interi commit: ogni capitolo ha il suo post mortem nel messaggio di commit.
+
+---
+
+## La mappa dei capitoli
+
+| # | file | what's in it | nel mondo reale si chiama | il numero da ricordare |
+|---|------|--------------|---------------------------|------------------------|
+| 0 | `database.c` | il punto di partenza: array contiguo di entry, il codice originale con i suoi bug didattici — lasciato intonso: è il fossile | — | — |
+| 1 | `database_debug.c` | la prima sistemazione: bug di frontiera, strumenti di ispezione, marker `FIX` | debugging | — |
+| 2 | `database_indexed.c` | buffer append-only + indice hash | **Bitcask** (append-only log + hash in RAM) | get O(1), catene di probing |
+| 3 | `database_compact.c` | tombstone, compattazione O(n), percentili p50/p90/p99 | il **merge** degli LSM | la distribuzione batte la media |
+| 4 | `database_persist.c` | CRC-32 per entry, snapshot compattati, load validato: prefisso sicuro | checksum + snapshot (SQLite, RocksDB) | 1 byte corrotto = persa solo quell'entry |
+| 5 | `database_learned.c` | spline sulla CDF delle chiavi al posto dell'hash di partenza | **learned index** (Kraska 2017) | l'invariante: cambi la funzione di partenza → ricostruisci |
+| 6 | `database_semantic.c` | bigrammi posizionali + MinHash + banding LSH: il db che capisce i refusi | **MinHash/LSH** (Broder 1997) | refusi ripescati nel top-8, ambiguità dichiarata |
+| 7 | `database_ring.c` | la scadenza come LUOGO (anello di tick) + delete a backshift | **timing wheel** (kernel Linux) | scadenze in batch, O(1) ammortizzato |
+| 8 | `database_quotient.c` | Bloom e quotient filter, la contabilità dei bit | **Bloom 1970 / Bender 2012** | falsi positivi misurati 0.777% vs 0.82% di teoria |
+| 9 | `database_persist_semantic.c` | la fusione: la risposta semantica viene dal disco, col valore — con l'esperimento *invariants-first* | — | 0 sbagliate su 60000 verifiche dal disco |
+
+## Il motore unico
+
+I capitoli sono dimostrativi monofunzione; `motore.h` + `motore.c` li consolidano in **un solo sistema** con API pubblica (handle opaco) e contratto scritto:
+
+```c
+motore_t *m = motore_apri();
+motore_put(m, chiave, klen, valore, vlen, ttl);     /* con TTL */
+motore_get(m, chiave, klen, &vlen);                 /* o NULL: mai bugie */
+motore_chiedi(m, query, qlen, k, risposte, &cand);  /* esatto -> conf 1.0;
+                                                       miss -> top-k semantico
+                                                       col valore */
+motore_intervallo(m, da, dalen, a, alen, k, out, &tot, NULL); /* [da..a]:
+                                                       l'hash non sa farlo */
+motore_avanza(m, t);                                 /* l'orologio e' tuo [I8] */
+motore_salva(m, "m.db");                             /* formato del capitolo 9 */
+motore_audit(m, &dichiarate);                        /* l'invariante [I7] in API */
+```
+
+Il cuore architetturale è l'invariante **[I7]: ogni entry viva È la versione corrente della sua chiave** — ogni morte (delete, scadenza, sorpasso) lascia il segno nello stesso istante in cui lascia il conto. Da qui: lo scan per intervalli è una passeggiata di byte senza lookup, e la coda post-compattazione si fonde da sola.
+
+Cosa **non** è entrato nel motore, e perché (l'obitorio): la delete a backshift (il motore ha la compattazione che ripulisce i tombstone: il backshift vince solo senza), il quotient filter (è un indice di appartenenza per chi non ha l'indice esatto), la spline lineare del capitolo 5 (qui il recinto a chiave piena è esatto per costruzione).
+
+## Compilare ed eseguire
+
+Serve `gcc` (MinGW su Windows, gcc su Linux) e `make`. Niente dipendenze.
+
+```bash
+make motore_demo        # il motore + il banco di prova: gate per OGNI invariante
+make database_quotient  # qualunque capitolo, uno per volta
+./motore_demo           # esce con EXIT!=0 se un contratto salta
+```
+
+Su Windows: il Device Guard può bloccare le exe appena compilate nella cartella del progetto (exit 126). Attendere qualche secondo e ripetere, o compilare in una directory fuori dai criteri.
+
+## I numeri del motore (misurati, non promessi)
+
+- 50000 chiavi vive su disco (2.46 MB): compattazione con ordinamento 64 ms, ricarica con ricostruzione di semantica, porte e anello 64 ms, 0 sbagliate su 60000 verifiche.
+- Intervallo `u0002500..u0003499`: 833 corrispondenze == 833 del conteggio indipendente, in 865 passi; il merge con la coda regge su tre conti.
+- Get esatti: p50 0.100 µs; porta Bloom: 99.22% degli alieni risolti senza toccare lo slot.
+- Refusi di una cifra: 99.9% di risposte dichiarate, verità nel top-8 al 94.2%, gruppo dei pari-merito 4.9 (l'ambiguità è del refuso, e il db la dichiara invece di fingere).
+- 20000 scadenze nello stesso tick: gestite in 0.1 ms **senza leggere una chiave**.
+
+## Le lezioni di metodo
+
+Questo repo è anche un diario di come si impara a costruire cose che non si sanno ancora costruire; capitolo per capitolo:
+
+- **Prima misurare, poi credere.** Ogni tecnica arriva con il suo numero confrontato con la teoria (Bloom: 0.777% vs 0.82%; banding: cattura prevista vs top-k misurato).
+- **Stampare non è bloccare.** Un test che stampa gli errori senza far fallire il processo non è un test: questa lezione costa due capitoli di fila nel post mortem.
+- **Confronto senza soglia non è gate.** Il passaggio da "0 == 0, verde!" a "470/500" è il cuore del post mortem del motore.
+- **Invariants-first.** Il contratto scritto prima del codice sposta la cattura dei bug a sinistra (nel design). Nel decimo capitolo: 8 trappole catturate a tavolino, 1 al primo run. Nel motore: il bug vero l'ha trovato un warning `-Wall` prima ancora del run.
+- **L'onestà è un'API.** Confidenze dichiarate, silenzio invece dell'invenzione, "forse" del Bloom distinto dal "no" del probe.
+
+## Struttura
+
+```
+database*.c            # i nove capitoli + l'originale: ognuno si compila da solo
+motore.h / motore.c    # il motore unico (API pubblica, handle opaco)
+demo_motore.c          # il banco di prova: gate a ogni invariante
+Makefile               # make motore_demo | make <capitolo>
+.gitignore             # eseguibili e file di prova non entrano nel repo
+```
+
+## Dove proseguire
+
+Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. I passi naturali dopo: WAL tra snapshot e snapshot, `fsync`, iteratori stabili, concorrenza a un'estremo per volta.

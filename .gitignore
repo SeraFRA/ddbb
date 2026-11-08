@@ -1,5 +1,9 @@
 # artefatti di build e file di prova dei demo
 *.exe
 *.o
+*.out
 *.db
+*.stackdump
 motore_demo
+Thumbs.db
+.DS_Store
