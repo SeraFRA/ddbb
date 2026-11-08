@@ -86,3 +86,7 @@ Makefile               # make motore_demo | make <capitolo>
 ## Dove proseguire
 
 Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. I passi naturali dopo: WAL tra snapshot e snapshot, `fsync`, iteratori stabili, concorrenza a un'estremo per volta.
+
+## Licenza
+
+MIT — vedi [LICENSE](LICENSE).
