@@ -6,6 +6,32 @@ Progetto didattico per autodidatti: ogni file è un capitolo autonomo e compilab
 
 ---
 
+## Come è nato: la collaborazione
+
+Questo repo è anche il verbale di una collaborazione fra un autore umano e un'AI di programmazione (Mistral Vibe). La prima richiesta non è stata "sistemami il codice" ma *"dammi degli hint per il debug, fammi imparare qualcosa"*: il contratto era capire, non avere. Da lì il metodo, rimasto uguale per dieci capitoli:
+
+1. **l'autore porta la direzione come metafora** — mai come specifica;
+2. **l'AI traduce la metafora in meccanica** (nome della tecnica, matematica, controparte nel mondo reale);
+3. **la meccanica va sotto misura**: numeri confrontati con la teoria, sempre;
+4. **i test sono rigidi e vincolano anche l'AI**: la demo esce con EXIT≠0 se un contratto salta, e ogni bug dell'AI finisce in un post mortem scritto nel punto esatto del codice dove è successo.
+
+Le metafore sono state il vero motore del design. Le principali:
+
+| l'autore ha detto | tradotta in meccanica, è diventata | nel capitolo |
+|---|---|---|
+| "un dipendente che si ricorda dove mette i prodotti negli scaffali, e li trova grazie alla probabilità delle volte prima" | **indice learned**: la previsione della posizione sostituisce la partenza a caso; l'invariante è che chi cambia la sua "memoria" ricostruisce la tabella | `database_learned.c` |
+| "un database che si comporti come la memoria umana: ogni cosa collegata e vicina in uno spazio semantico probabilistico" | **MinHash + banding LSH**: lo spazio semantico è l'insieme dei bigrammi posizionali; due chiavi sono "vicine" se condividono pezzi; la probabilità d'incontro è la firma | `database_semantic.c` |
+| "un db che non sia puramente determinista: dia risposte probabili, rispondendo alle domande con le sue entry" | la **confidenza dichiarata**: hit esatto → 1.0; refuso → top-k col valore, gruppo dei pari-merito quando la verità è ambigua, silenzio quando non c'è niente da dire | `db_chiedi` / `motore_chiedi` |
+| "i dati che scadono non vanno controllati a ogni lettura" | **timing wheel**: la scadenza smette di essere un calcolo e diventa un luogo dell'anello | `database_ring.c` |
+
+Il punto onesto: l'AI ha proposto anche capitoli per conto suo (Bloom/quotient, persistenza), ma le intuizioni che hanno girato il progetto verso il probabilistico sono tutte dell'autore — ed è lì che sta il valore della collaborazione: le metafore umane hanno scelto **quali** tecniche meritavano di esistere, l'AI ha scelto **come** farle funzionare e ne ha pagato i bug, documentandoli.
+
+Il metodo si è affilato col tempo fino all'esperimento **invariants-first** del decimo capitolo: contratto scritto prima del codice. Prima il ciclo era *codice → bug → post mortem*, per tre capitoli di fila; poi il ciclo si è invertito — 8 trappole catturate a tavolino prima di scrivere una riga, 1 al primo run, e il bug scappato ha detto esattamente quale asserzione mancava nei test. Il verdetto dell'esperimento è nel commit del decimo capitolo e nell'header del motore.
+
+Cosa ha insegnato, in una frase: una metafora umana più un test che sa fallire valgono più di cento righe generate — perché vincolano la direzione, non solo la sintassi.
+
+---
+
 ## La mappa dei capitoli
 
 | # | file | what's in it | nel mondo reale si chiama | il numero da ricordare |
