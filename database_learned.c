@@ -41,7 +41,7 @@
  * La posizione di una chiave nella tabella dipende dal punto di partenza
  * usato quando e' stata inserita. Se la funzione di partenza cambia
  * (addestramento, cambio motore, raddoppio della tabella) SENZA
- * ricostruire, le chiavi становятся irraggiungibili: cercare partendo da
+ * ricostruire, le chiavi diventano irraggiungibili: cercare partendo da
  * un punto diverso non trovera' mai cio' che sta oltre il primo slot
  * vuoto della catena. Quindi:
  *
@@ -449,14 +449,14 @@ static int ricostruisci(db_t *db)
  * cambia_modalita: il commesso subentra alla mappa (o viceversa).
  * Sempre nello stesso ordine: (1) RIADDESTRA sul dataset corrente
  * (il commesso all'inizio del turno rilegge il magazzino, sempre:
- * usare un modello stanco non risparmiа niente e confonde l'invariante),
+ * usare un modello stanco non risparmia niente e confonde l'invariante),
  * (2) ricostruisci con la funzione nuova. Il contrario cercherebbe con un
  * modello allenato su chiavi che gia' non ci sono piu'.
  */
 static int cambia_modalita(db_t *db, int usa_modello)
 {
     if (db->usa_modello == usa_modello)
-        return DB_OK;                    /* niente cambia, niente si rifа */
+        return DB_OK;                    /* niente cambia, niente si rifa' */
     if (usa_modello && db->n_entry > 0) {
         int r = addestra(db);
         if (r != DB_OK)

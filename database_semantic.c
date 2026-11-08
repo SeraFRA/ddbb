@@ -64,7 +64,7 @@
 #define N_RIGHE       4         /* minh per banda                     */
 #define N_BUCKET_BN   17        /* 2^17 bucket per banda              */
 #define SOGLIA        0.40      /* confidenza minima dichiarata        */
-#define MAX_CANDIDATI 8192      /* tetto difensivo per query成本低噪 */
+#define MAX_CANDIDATI 8192      /* tetto difensivo per query          */
 #define TOPLIM        8         /* k max per db_chiedi                */
 #define MAX_GRAMMI    66        /* ^chiave$ -> len+1 bigrammi         */
 

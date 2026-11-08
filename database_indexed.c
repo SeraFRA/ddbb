@@ -322,7 +322,7 @@ const uint8_t *db_get(db_t *db, const char *key, size_t key_len,
 /*
  * get_lineare: la ricerca DI CONFRONTO, quella dell'iterazione precedente.
  * Identica semanticamente a db_get, ma cammina il buffer dall'inizio.
- * Serve solo per il benchmark: misurare ilн stesso lavoro con i due
+ * Serve solo per il benchmark: misurare il stesso lavoro con i due
  * algoritmi e' l'unico modo onesto di confronto.
  */
 static const uint8_t *get_lineare(const db_t *db, const char *key,

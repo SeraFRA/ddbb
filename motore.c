@@ -40,7 +40,7 @@
  *       (Il decimo usava ">" strett: la differenza e' dichiarata.)
  *  [I9] IL BLOOM NON PUO' DIRE BUGIE IN NEGATIVO. "0" = certamente
  *       non c'e' (mai un falso negativo su una chiave viva),
- *       "1" = probabilmente. Mantenuto: insert in derivo,一张
+ *       "1" = probabilmente. Mantenuto: insert in derivo, una
  *       ricostruzione a ogni compattazione. Il prezzo e' onesto: le
  *       cancellate rispondono "1 forse" fino alla prossima
  *       compattazione — e' un filtro, non un indice.
