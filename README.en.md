@@ -85,7 +85,7 @@ make database_quotient  # any chapter, one at a time
 
 On Windows: Device Guard may block freshly compiled binaries in the project folder (exit 126). Wait a few seconds and retry, or build in a directory outside the policy.
 
-The push is protected by CI: on every push an ubuntu+gcc job rebuilds every chapter and **runs it as a test bench** — a broken contract turns the badge at the top of this README red. (Its first catch was the Linux port: four chapters compiled only on MinGW because the non-Windows branch used `struct timespec` and `clock_gettime` without including `<time.h>`; and even including it, with strict `-std=c11` glibc does not declare `clock_gettime` without `_POSIX_C_SOURCE` — which now lives in the Makefile for everyone.)
+The push is protected by CI: on every push an ubuntu+gcc job rebuilds every chapter and **runs it as a test bench** — a broken contract turns the badge at the top of this README red. The CI's first two catches: the Linux port (four chapters compiled only on MinGW because the non-Windows branch used `struct timespec` and `clock_gettime` without including `<time.h>`; and even including it, with strict `-std=c11` glibc does not declare `clock_gettime` without `_POSIX_C_SOURCE`) and the linking of `pow()`: on Linux it lives in libm, which MinGW folds into the runtime — hence the local builds working. The Makefile now carries `_POSIX_C_SOURCE` in CFLAGS and `-lm` in LDLIBS.
 
 ## The engine's numbers (measured, not promised)
 

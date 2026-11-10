@@ -85,7 +85,7 @@ make database_quotient  # qualunque capitolo, uno per volta
 
 Su Windows: il Device Guard può bloccare le exe appena compilate nella cartella del progetto (exit 126). Attendere qualche secondo e ripetere, o compilare in una directory fuori dai criteri.
 
-Il push è protetto dalla CI: a ogni push un job ubuntu+gcc ricompila ogni capitolo e **lo fa girare come banco di prova** — un contratto che salta rende rosso il badge in testa al README. (Il primo a pagarlo è stato il porting Linux: quattro capitoli compilavano solo su MinGW perché il ramo non-Windows usava `struct timespec` e `clock_gettime` senza includere `<time.h>`; e anche includendolo, con `-std=c11` stretto la glibc non dichiara `clock_gettime` senza `_POSIX_C_SOURCE` — che ora sta nel Makefile per tutti.)
+Il push è protetto dalla CI: a ogni push un job ubuntu+gcc ricompila ogni capitolo e **lo fa girare come banco di prova** — un contratto che salta rende rosso il badge in testa al README. Le prime due prede della CI: il porting Linux (quattro capitoli compilavano solo su MinGW perché il ramo non-Windows usava `struct timespec` e `clock_gettime` senza includere `<time.h>`; e anche includendolo, con `-std=c11` stretto la glibc non dichiara `clock_gettime` senza `_POSIX_C_SOURCE`) e il link di `pow()`: su Linux vive in libm, che MinGW piega dentro il runtime — ecco perché in locale linkava. Ora Makefile: `_POSIX_C_SOURCE` nei CFLAGS, `-lm` negli LDLIBS.
 
 ## I numeri del motore (misurati, non promessi)
 

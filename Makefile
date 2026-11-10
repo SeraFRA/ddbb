@@ -7,14 +7,18 @@ CC      = gcc
 # luce su Linux senza cambiare niente su MinGW, dove l'orologio passa
 # da windows.h.
 CFLAGS  = -Wall -Wextra -Wpedantic -std=c11 -O2 -D_POSIX_C_SOURCE=199309L
+# LDLIBS: su Linux pow/exp vivono in libm, che MinGW piega dentro il
+# runtime (per questo in locale linkava anche senza: la scoperta della
+# CI al primo giro). -lm su MinGW e' un no-op innocuo.
+LDLIBS  = -lm
 
 # il motore
 motore_demo: motore.c demo_motore.c motore.h
-	$(CC) $(CFLAGS) -o $@ motore.c demo_motore.c
+	$(CC) $(CFLAGS) -o $@ motore.c demo_motore.c $(LDLIBS)
 
 # i capitoli storici (esempi: make database_ring)
 %: %.c
-	$(CC) $(CFLAGS) -o $@ $<
+	$(CC) $(CFLAGS) -o $@ $< $(LDLIBS)
 
 clean:
 	rm -f *.exe *.db motore_demo database_debug database_indexed \
