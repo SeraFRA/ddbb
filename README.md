@@ -2,6 +2,8 @@
 
 [![ci](https://github.com/SeraFRA/ddbb/actions/workflows/ci.yml/badge.svg)](https://github.com/SeraFRA/ddbb/actions/workflows/ci.yml)
 
+[English](README.en.md) | Italiano
+
 **Un database in C puro, nato da un array di valori contigui e cresciuto fino a un motore con persistenza, indice appreso e memoria semantica.**
 
 Progetto didattico per autodidatti: ogni file è un capitolo autonomo e compilabile, verificato con test automatici e **numeri misurati contro la teoria** — mai promessi, sempre misurati. Zero librerie esterne: solo C11 e la stdlib. La storia è per interi commit: ogni capitolo ha il suo post mortem nel messaggio di commit.
