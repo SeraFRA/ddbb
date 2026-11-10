@@ -28,7 +28,7 @@ jobs:
           database_ring database_quotient database_persist_semantic
           motore_demo
 
-      - name: collaudo del motore: ASan + UBSan
+      - name: collaudo del motore (ASan + UBSan)
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
               -fsanitize=address,undefined -fno-sanitize-recover=all \
