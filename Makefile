@@ -2,7 +2,11 @@
 # unico e' il primo a stare in piu' unita'. I dieci file storici si
 # compilano come sempre, uno per uno.
 CC      = gcc
-CFLAGS  = -Wall -Wextra -Wpedantic -std=c11 -O2
+# _POSIX_C_SOURCE: con -std=c11 stretto glibc non dichiara clock_gettime
+# (e la struct timespec resta pratica ideale); il define lo riporta alla
+# luce su Linux senza cambiare niente su MinGW, dove l'orologio passa
+# da windows.h.
+CFLAGS  = -Wall -Wextra -Wpedantic -std=c11 -O2 -D_POSIX_C_SOURCE=199309L
 
 # il motore
 motore_demo: motore.c demo_motore.c motore.h
@@ -13,6 +17,9 @@ motore_demo: motore.c demo_motore.c motore.h
 	$(CC) $(CFLAGS) -o $@ $<
 
 clean:
-	rm -f motore_demo motore_demo.exe *.db
+	rm -f *.exe *.db motore_demo database_debug database_indexed \
+	      database_compact database_persist database_learned \
+	      database_semantic database_ring database_quotient \
+	      database_persist_semantic
 
 .PHONY: clean

@@ -1,0 +1,42 @@
+# CI: il repo si verifica da solo a ogni push.
+# Costruisce su Linux (dove il ramo clock_gettime di ora_ms gira davvero)
+# e fa girare OGNI capitolo come banco di prova: tutti escono con EXIT=0,
+# ogni gate che salta fa rosso il badge.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  banchi-di-prova:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: il fossile deve solo compilare
+        run: gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -fsyntax-only database.c
+
+      - name: compila i capitoli e il motore
+        run: >
+          make database_debug database_indexed database_compact
+          database_persist database_learned database_semantic
+          database_ring database_quotient database_persist_semantic
+          motore_demo
+
+      - name: ogni capitolo e' il proprio banco di prova
+        run: |
+          stato=0
+          for b in database_debug database_indexed database_compact \
+                   database_persist database_learned database_semantic \
+                   database_ring database_quotient \
+                   database_persist_semantic motore_demo; do
+            echo "=== $b ==="
+            if ./$b; then
+              echo "--- $b: verde"
+            else
+              echo "!!! GATE FALLITO in $b"
+              stato=1
+            fi
+          done
+          exit $stato

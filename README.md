@@ -1,5 +1,7 @@
 # progettodatabase
 
+[![ci](https://github.com/SeraFRA/ddbb/actions/workflows/ci.yml/badge.svg)](https://github.com/SeraFRA/ddbb/actions/workflows/ci.yml)
+
 **Un database in C puro, nato da un array di valori contigui e cresciuto fino a un motore con persistenza, indice appreso e memoria semantica.**
 
 Progetto didattico per autodidatti: ogni file è un capitolo autonomo e compilabile, verificato con test automatici e **numeri misurati contro la teoria** — mai promessi, sempre misurati. Zero librerie esterne: solo C11 e la stdlib. La storia è per interi commit: ogni capitolo ha il suo post mortem nel messaggio di commit.
@@ -71,7 +73,7 @@ Cosa **non** è entrato nel motore, e perché (l'obitorio): la delete a backshif
 
 ## Compilare ed eseguire
 
-Serve `gcc` (MinGW su Windows, gcc su Linux) e `make`. Niente dipendenze.
+Serve `gcc` (MinGW su Windows, gcc su Linux) e `make` (su Windows lo porta MSYS2 come `mingw32-make`; a mano: `gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -o motore_demo motore.c demo_motore.c`). Niente dipendenze.
 
 ```bash
 make motore_demo        # il motore + il banco di prova: gate per OGNI invariante
@@ -80,6 +82,8 @@ make database_quotient  # qualunque capitolo, uno per volta
 ```
 
 Su Windows: il Device Guard può bloccare le exe appena compilate nella cartella del progetto (exit 126). Attendere qualche secondo e ripetere, o compilare in una directory fuori dai criteri.
+
+Il push è protetto dalla CI: a ogni push un job ubuntu+gcc ricompila ogni capitolo e **lo fa girare come banco di prova** — un contratto che salta rende rosso il badge in testa al README. (Il primo a pagarlo è stato il porting Linux: quattro capitoli compilavano solo su MinGW perché il ramo non-Windows usava `struct timespec` e `clock_gettime` senza includere `<time.h>`; e anche includendolo, con `-std=c11` stretto la glibc non dichiara `clock_gettime` senza `_POSIX_C_SOURCE` — che ora sta nel Makefile per tutti.)
 
 ## I numeri del motore (misurati, non promessi)
 
