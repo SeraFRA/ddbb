@@ -4,7 +4,7 @@
 
 [English](README.en.md) | Italiano
 
-**Un database in C puro, nato da un array di valori contigui e cresciuto fino a un motore con persistenza, indice appreso e memoria semantica.**
+**Un database in C puro, nato da un array di valori contigui e cresciuto fino a un motore con persistenza, indice appreso, memoria semantica — e un layer MCP che lo rende uno strumento chiamabile dagli agenti.**
 
 Progetto didattico per autodidatti: ogni file è un capitolo autonomo e compilabile, verificato con test automatici e **numeri misurati contro la teoria** — mai promessi, sempre misurati. Zero librerie esterne: solo C11 e la stdlib. La storia è per interi commit: ogni capitolo ha il suo post mortem nel messaggio di commit.
 
@@ -50,6 +50,7 @@ Cosa ha insegnato, in una frase: una metafora umana più un test che sa fallire 
 | 7 | `database_ring.c` | la scadenza come LUOGO (anello di tick) + delete a backshift | **timing wheel** (kernel Linux) | scadenze in batch, O(1) ammortizzato |
 | 8 | `database_quotient.c` | Bloom e quotient filter, la contabilità dei bit | **Bloom 1970 / Bender 2012** | falsi positivi misurati 0.777% vs 0.82% di teoria |
 | 9 | `database_persist_semantic.c` | la fusione: la risposta semantica viene dal disco, col valore — con l'esperimento *invariants-first* | — | 0 sbagliate su 60000 verifiche dal disco |
+| 11 | `mcp_server.c` + `mcp_stdio.c` | il layer MCP: il motore come strumento per un agente LLM — 9 tool, confidenza sempre dichiarata, `presente` batch | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms del giro LLM |
 
 ## Il motore unico
 
@@ -73,12 +74,31 @@ Il cuore architetturale è l'invariante **[I7]: ogni entry viva È la versione c
 
 Cosa **non** è entrato nel motore, e perché (l'obitorio): la delete a backshift (il motore ha la compattazione che ripulisce i tombstone: il backshift vince solo senza), il quotient filter (è un indice di appartenenza per chi non ha l'indice esatto), la spline lineare del capitolo 5 (qui il recinto a chiave piena è esatto per costruzione).
 
+## Il layer MCP: il motore come strumento (capitolo 11)
+
+Metafora: *l'agente non deve conoscere il motore, deve poterlo chiamare — e ogni risposta deve dichiarare quanto vale.* Meccanica: un server MCP (spec 2025-06-18, JSON-RPC 2.0 su stdio) sopra l'**API pubblica** del motore, senza toccarne l'interno: `mcp_stdio.c` (il guscio: una riga JSON in, una riga JSON out), `mcp_server.c` (il nucleo `mcp_gestisci`, puro e testabile in process), `json.c` (parser minimale scritto a mano: zero dipendenze, e **una fonte di verità sola** — lo usa il filo e lo usa il banco per verificare le risposte). Il contratto è [M1]..[M9], scritto prima del codice:
+
+- **meno round-trip possibile**: `chiedi` torna chiave E valore E confidenza (mai solo le chiavi: la seconda chiamata per i valori è il bug economico); `intervallo` torna il batch più il totale; `presente` è batch (fino a 256 chiavi per chiamata).
+- **la confidenza viaggia sempre**: confidenza bassa = l'agente sa che può ritentare con un'altra formulazione. Auto-correzione a un solo giro in più.
+- **`presente` come pre-filtro**: "certamente no" [I9] a costo quasi zero — l'agente decide se vale la pena spendere la chiamata.
+- **`audit` come tool**: il contratto rotto è visibile anche all'agente, che può non fidarsi e verificare.
+- **i limiti sono la description**: la similarità è SINTATTICA (bigrammi + MinHash), non semantica — è la parte che l'LLM legge prima di chiamare.
+- **l'orologio è del chiamante [I8]**: `avanza` è un tool; il server non legge mai l'orologio da muro.
+
+I numeri del banco `demo_mcp` (misurati, gate incluso): get p50 2.1 µs / p99 2.3 µs, risposta 149 byte (~37 token); `chiedi` su refusi p50 9.5 µs, verità nel top-8 all'88%; `presente` batch-64 in 15 µs; `intervallo` su finestre di 100 in 23 µs. Un compito tipico è **un round-trip solo**: il costo di ogni interrogazione è il giro LLM (10²..10³ ms di generazione), e il layer lo minimizza. Il banco misura anche il ciclo di vita del bloom: 90.6% di "forse" sugli alieni prima della ricomposizione (filtro stantio, 3072 bit), 0/32 dopo il giro del disco — il derivato si raddrizza da solo, dichiarato non nascosto.
+
+Posizionamento, detto onestamente: non competiamo con Mem0/Zep/Letta sul loro piano (loro sono logica di estrazione LLM-based); siamo **il piano sotto** — il substrato di storage in-process, deterministico, zero-dipendenze, TTL nativo. Il confronto giusto è con Redis/Qdrant come backend, e la nicchia è la memoria embedded/edge dove una chiamata LLM per `add()` è inaccettabile. Il costo nostro è in domanda (ogni interrogazione è generazione di token), il loro in scrittura (ogni messaggio ingerito passa da un LLM): per un agente che scrive molto e interroga selettivamente, il nostro modello è più economico di un fattore enorme.
+
+E l'uso che chiude il cerchio: montato come MCP server in un agente (per esempio Mistral Vibe), il motore diventa nativamente chiamabile — il debugging del progetto passa dallo strumento che il progetto fornisce. Il banco resta la misura; l'agente è la testimonianza.
+
 ## Compilare ed eseguire
 
 Serve `gcc` (MinGW su Windows, gcc su Linux) e `make` (su Windows lo porta MSYS2 come `mingw32-make`; a mano: `gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -o motore_demo motore.c demo_motore.c`). Niente dipendenze.
 
 ```bash
 make motore_demo        # il motore + il banco di prova: gate per OGNI invariante
+make mcp_server         # il server MCP su stdio: ./mcp_server [file.db [tick]]
+make demo_mcp           # il banco del layer MCP: gate [M1]..[M9] + MISURA
 make database_quotient  # qualunque capitolo, uno per volta
 ./motore_demo           # esce con EXIT!=0 se un contratto salta
 ```
@@ -111,13 +131,17 @@ Questo repo è anche un diario di come si impara a costruire cose che non si san
 database*.c            # i nove capitoli + l'originale: ognuno si compila da solo
 motore.h / motore.c    # il motore unico (API pubblica, handle opaco)
 demo_motore.c          # il banco di prova: gate a ogni invariante
-Makefile               # make motore_demo | make <capitolo>
+json.h / json.c        # il parser JSON minimale: una fonte di verita' per il filo
+mcp_server.h / mcp_server.c  # il nucleo MCP: 9 tool, contratto [M1]..[M9]
+mcp_stdio.c            # il guscio sottile: stdin/stdout, un oggetto per riga
+demo_mcp.c             # il banco del layer: gate e MISURA (latenze, token)
+Makefile               # make motore_demo | make mcp_server | make <capitolo>
 .gitignore             # eseguibili e file di prova non entrano nel repo
 ```
 
 ## Dove proseguire
 
-Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. I passi naturali dopo: WAL tra snapshot e snapshot, `fsync`, iteratori stabili, concorrenza a un'estremo per volta.
+Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. I passi naturali dopo: WAL tra snapshot e snapshot, `fsync`, iteratori stabili, concorrenza a un'estremo per volta. E il capitolo dodicesimo già dichiarato: il prefetcher speculativo che guarda la traccia dei pensieri dell'agente — la predizione come query semantica sulla traccia, in parcheggio con TTL corto, hit-rate sotto soglia o niente.
 
 ## Licenza
 

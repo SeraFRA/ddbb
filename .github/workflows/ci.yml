@@ -26,7 +26,7 @@ jobs:
           database_debug database_indexed database_compact
           database_persist database_learned database_semantic
           database_ring database_quotient database_persist_semantic
-          motore_demo
+          motore_demo mcp_server demo_mcp
 
       - name: collaudo del motore (ASan + UBSan)
         run: |
@@ -35,13 +35,25 @@ jobs:
               -o motore_asan motore.c demo_motore.c -lm
           ./motore_asan
 
+      - name: collaudo del layer MCP (ASan + UBSan)
+        run: |
+          gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
+              -fsanitize=address,undefined -fno-sanitize-recover=all \
+              -o mcp_asan demo_mcp.c mcp_server.c json.c motore.c -lm
+          ./mcp_asan
+
+      - name: il server MCP risponde su stdio
+        run: |
+          printf '{"jsonrpc":"2.0","id":1,"method":"ping"}\n' | ./mcp_server > risp.txt
+          grep -q '"result":{}' risp.txt
+
       - name: ogni capitolo e' il proprio banco di prova
         run: |
           stato=0
           for b in database_debug database_indexed database_compact \
                    database_persist database_learned database_semantic \
                    database_ring database_quotient \
-                   database_persist_semantic motore_demo; do
+                   database_persist_semantic motore_demo demo_mcp; do
             echo "=== $b ==="
             if ./$b; then
               echo "--- $b: verde"

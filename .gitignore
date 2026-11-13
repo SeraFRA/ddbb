@@ -5,5 +5,7 @@
 *.db
 *.stackdump
 motore_demo
+mcp_server
+demo_mcp
 Thumbs.db
 .DS_Store

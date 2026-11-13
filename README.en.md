@@ -4,7 +4,7 @@
 
 English | [Italiano](README.md)
 
-**A database in pure C, started from a contiguous array of values and grown into an engine with persistence, a learned index and a semantic memory.**
+**A database in pure C, started from a contiguous array of values and grown into an engine with persistence, a learned index, a semantic memory — and an MCP layer that turns it into a tool agents can call.**
 
 Self-teaching project: every file is a standalone, compilable chapter, verified with automatic tests and **numbers measured against theory** — never promised, always measured. Zero external libraries: only C11 and the standard library. The history lives in the commits: every chapter carries its post mortem in the commit message.
 
@@ -50,6 +50,7 @@ What it taught, in one sentence: a human metaphor plus a test that knows how to 
 | 7 | `database_ring.c` | expiry as a PLACE (a ring of ticks) + backshift delete | **timing wheel** (Linux kernel) | batch expiries, amortized O(1) |
 | 8 | `database_quotient.c` | Bloom and quotient filter, the accounting of bits | **Bloom 1970 / Bender 2012** | false positives measured 0.777% vs 0.82% theory |
 | 9 | `database_persist_semantic.c` | the fusion: the semantic answer comes from disk, with the value — featuring the *invariants-first* experiment | — | 0 wrong out of 60000 disk verifications |
+| 11 | `mcp_server.c` + `mcp_stdio.c` | the MCP layer: the engine as a tool for an LLM agent — 9 tools, confidence always declared, batch `presente` | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms of the LLM round-trip |
 
 ## The single engine
 
@@ -73,12 +74,31 @@ The architectural heart is invariant **[I7]: every live entry IS the current ver
 
 What did **not** make it into the engine, and why (the morgue): the backshift delete (the engine has compaction cleaning up tombstones: backshift only wins without it), the quotient filter (it is a membership index for those who lack an exact one), the linear spline of chapter 5 (here the full-key fence is exact by construction).
 
+## The MCP layer: the engine as a tool (chapter 11)
+
+Metaphor: *the agent must not know the engine, it must be able to call it — and every answer must declare what it is worth.* Mechanics: an MCP server (spec 2025-06-18, JSON-RPC 2.0 over stdio) on top of the engine's **public API**, without touching its internals: `mcp_stdio.c` (the thin shell: one JSON line in, one out), `mcp_server.c` (the pure, in-process-testable core `mcp_gestisci`), `json.c` (a hand-written minimal parser: zero dependencies, and **one single source of truth** — the wire uses it and the bench uses it to verify the answers). The contract is [M1]..[M9], written before the code:
+
+- **as few round-trips as possible**: `chiedi` returns key AND value AND confidence (never keys alone: the second call for the values is the economic bug); `intervallo` returns the batch plus the total; `presente` is batch (up to 256 keys per call).
+- **confidence always travels**: low confidence = the agent knows it can retry with another wording. Self-correction for one extra round.
+- **`presente` as pre-filter**: "certainly not" [I9] at near-zero cost — the agent decides whether the call is worth it.
+- **`audit` as a tool**: a broken contract is visible to the agent too, which may distrust and verify.
+- **the limits are the description**: the similarity is SYNTACTIC (positional bigrams + MinHash), not semantic — that is the part the LLM reads before calling.
+- **the clock is the caller's [I8]**: `avanza` is a tool; the server never reads a wall clock.
+
+Numbers from the `demo_mcp` bench (measured, gate included): get p50 2.1 µs / p99 2.3 µs, answer 149 bytes (~37 tokens); `chiedi` on typos p50 9.5 µs, truth in the top-8 at 88%; `presente` batch-64 in 15 µs; `intervallo` over 100-key windows in 23 µs. A typical task is **one round-trip only**: the cost of every query is the LLM round (10²..10³ ms of generation), and the layer minimizes it. The bench also measures the bloom's life cycle: 90.6% "maybe" on aliens before recomposition (stale filter, 3072 bits), 0/32 after the disk round — the derived structure straightens itself out, declared not hidden.
+
+Positioning, stated honestly: we do not compete with Mem0/Zep/Letta on their plane (they are LLM-based extraction logic); we are **the plane below** — the in-process, deterministic, zero-dependency, native-TTL storage substrate. The fair comparison is with Redis/Qdrant as a backend, and the niche is embedded/edge memory where one LLM call per `add()` is unacceptable. Our cost is on queries (every interrogation is token generation), theirs on writes (every ingested message goes through an LLM): for an agent that writes a lot and interrogates selectively, our model is cheaper by a huge factor.
+
+And the use that closes the loop: mounted as an MCP server in an agent (Mistral Vibe, for one), the engine becomes natively callable — debugging the project goes through the tool the project provides. The bench stays the measurement; the agent is the testimony.
+
 ## Build and run
 
 You need `gcc` (MinGW on Windows, gcc on Linux) and `make` (on Windows MSYS2 provides it as `mingw32-make`; by hand: `gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -o motore_demo motore.c demo_motore.c`). No dependencies.
 
 ```bash
 make motore_demo        # the engine + the test bench: a gate for EVERY invariant
+make mcp_server         # the MCP server over stdio: ./mcp_server [file.db [tick]]
+make demo_mcp           # the MCP layer bench: gates [M1]..[M9] + MEASUREMENT
 make database_quotient  # any chapter, one at a time
 ./motore_demo           # exits with EXIT!=0 if a contract breaks
 ```
@@ -111,13 +131,17 @@ This repo is also a diary of how one learns to build things one does not know ho
 database*.c            # the nine chapters + the original: each builds alone
 motore.h / motore.c    # the single engine (public API, opaque handle)
 demo_motore.c          # the test bench: a gate per invariant
-Makefile               # make motore_demo | make <chapter>
+json.h / json.c        # the minimal JSON parser: one source of truth for the wire
+mcp_server.h / mcp_server.c  # the MCP core: 9 tools, contract [M1]..[M9]
+mcp_stdio.c            # the thin shell: stdin/stdout, one object per line
+demo_mcp.c             # the layer's bench: gates and MEASUREMENT (latency, tokens)
+Makefile               # make motore_demo | make mcp_server | make <chapter>
 .gitignore             # binaries and test files stay out of the repo
 ```
 
 ## Where to go next
 
-The engine declares its limits in `motore.c`'s header: single-threaded, stats via `printf` (teaching project), answers alive until the next put. The natural next steps: a WAL between snapshots, `fsync`, stable iterators, concurrency one extreme at a time.
+The engine declares its limits in `motore.c`'s header: single-threaded, stats via `printf` (teaching project), answers alive until the next put. The natural next steps: a WAL between snapshots, `fsync`, stable iterators, concurrency one extreme at a time. And the twelfth chapter, already declared: the speculative prefetcher that watches the agent's reasoning trace — prediction as a semantic query on the trace, staged with a short TTL, hit-rate above a threshold or nothing.
 
 ## License
 

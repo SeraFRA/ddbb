@@ -455,7 +455,7 @@ static int cresci_slot(motore_t *m)
     m->slot = nuovo;
     m->n_slot = nuovo_n;
     m->n_tomb = 0;
-    printf("[motore] slot raddoppiati a %zu\n", nuovo_n);
+    fprintf(stderr, "[motore] slot raddoppiati a %zu\n", nuovo_n);
     return MOTORE_OK;
 }
 
@@ -1066,11 +1066,11 @@ motore_t *motore_apri_da(const char *nome, uint32_t adesso, size_t *scartate)
         off += dim;
     }
     if (fermati)
-        printf("[motore] validazione ferma a offset %zu (di %zu): "
+        fprintf(stderr, "[motore] validazione ferma a offset %zu (di %zu): "
                "troncata o CRC, ignoro %zu byte di coda [I5]\n",
                fermati_a, size, size - fermati_a);
     if (dichiara != vive)
-        printf("[motore] header dichiarava %u, validate %zu: "
+        fprintf(stderr, "[motore] header dichiarava %u, validate %zu: "
                "mi fido della validazione\n", dichiara, vive);
 
     /* PASSO 2: copia e deriva */
@@ -1306,7 +1306,7 @@ size_t motore_audit(const motore_t *m, size_t *dichiarate)
 void motore_statistiche(const motore_t *m, const char *etichetta)
 {
     double mn = m->n_voci ? (double)m->bloom_m / (double)m->n_voci : 0.0;
-    printf("%-14s %8zu byte, %6zu spazzatura (%4.1f%%), %5zu vive, %5zu voci, "
+    fprintf(stderr, "%-14s %8zu byte, %6zu spazzatura (%4.1f%%), %5zu vive, %5zu voci, "
            "%6zu slot (LF %2.0f%%), ordine %s (%zu/%zu, recinto %zu), "
            "bloom m/n=%.1f, scadute batch %llu, sonde risparmiate %llu\n",
            etichetta, m->usato, m->spazzatura,

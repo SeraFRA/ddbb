@@ -16,12 +16,19 @@ LDLIBS  = -lm
 motore_demo: motore.c demo_motore.c motore.h
 	$(CC) $(CFLAGS) -o $@ motore.c demo_motore.c $(LDLIBS)
 
+# il layer MCP (capitolo 11): nucleo + guscio stdio + banco di prova
+mcp_server: mcp_stdio.c mcp_server.c json.c motore.c mcp_server.h json.h motore.h
+	$(CC) $(CFLAGS) -o $@ mcp_stdio.c mcp_server.c json.c motore.c $(LDLIBS)
+
+demo_mcp: demo_mcp.c mcp_server.c json.c motore.c mcp_server.h json.h motore.h
+	$(CC) $(CFLAGS) -o $@ demo_mcp.c mcp_server.c json.c motore.c $(LDLIBS)
+
 # i capitoli storici (esempi: make database_ring)
 %: %.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDLIBS)
 
 clean:
-	rm -f *.exe *.db motore_demo database_debug database_indexed \
+	rm -f *.exe *.db motore_demo mcp_server demo_mcp database_debug database_indexed \
 	      database_compact database_persist database_learned \
 	      database_semantic database_ring database_quotient \
 	      database_persist_semantic
