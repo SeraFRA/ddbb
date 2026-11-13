@@ -104,13 +104,18 @@ Per l'AI che ci lavora e per l'umano che la guida. Nasce da dieci capitoli
 - **La memoria di lavoro** vive nel motore via MCP (server `motore`,
   file `memoria.db`, gitignored). Il repo è la verità durevole e la
   memoria NON la duplica: dentro va ciò che non è ancora nel repo —
-  lavori in corso, scoperte non scritte, decisioni in bilico. Quando
-  una cosa entra nel repo (commit), la voce muore: le voci di lavoro
-  nascono con TTL contato in sessioni. All'apertura di una sessione di
-  lavoro: `avanza(adesso+1)` — un tick per sessione. Chiavi a
-  namespace (`in-corso/...`, `nota/...`): l'intervallo le lista per
-  prefisso. Dopo scritture che pesano: `salva`. L'onestà è quella del
-  motore: confidenza dichiarata, silenzio invece di invenzione.
+  lavori in corso, scoperte non scritte, decisioni in bilico. La morte
+  è esplicita: quando una cosa entra nel repo (commit), la voce si
+  cancella con `del`. L'orologio della memoria è FERMO (il server parte
+  a tick 1 e non si avanza mai): il file PDB1 non porta il clock, e un
+  tick di partenza statico non può essere monotonic tra riavvii — le
+  voci nate a un tick sopra la partenza morirebbero al load per wrap
+  dell'aritmetica. Il TTL contato in sessioni sta nell'obitorio: vuole
+  il tick dentro il file (formato v2, col loader che legge entrambe).
+  Chiavi a namespace (`in-corso/...`, `nota/...`): l'intervallo le
+  lista per prefisso. Dopo scritture che pesano: `salva`. L'onestà è
+  quella del motore: confidenza dichiarata, silenzio invece di
+  invenzione.
 
 ## Replicare altrove
 
