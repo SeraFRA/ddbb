@@ -101,6 +101,16 @@ Per l'AI che ci lavora e per l'umano che la guida. Nasce da dieci capitoli
 - Su Windows il Device Guard può bloccare le exe appena compilate nella
   cartella del progetto (exit 126): attendere alcuni secondi, o compilare
   fuori dalla cartella.
+- **La memoria di lavoro** vive nel motore via MCP (server `motore`,
+  file `memoria.db`, gitignored). Il repo è la verità durevole e la
+  memoria NON la duplica: dentro va ciò che non è ancora nel repo —
+  lavori in corso, scoperte non scritte, decisioni in bilico. Quando
+  una cosa entra nel repo (commit), la voce muore: le voci di lavoro
+  nascono con TTL contato in sessioni. All'apertura di una sessione di
+  lavoro: `avanza(adesso+1)` — un tick per sessione. Chiavi a
+  namespace (`in-corso/...`, `nota/...`): l'intervallo le lista per
+  prefisso. Dopo scritture che pesano: `salva`. L'onestà è quella del
+  motore: confidenza dichiarata, silenzio invece di invenzione.
 
 ## Replicare altrove
 
