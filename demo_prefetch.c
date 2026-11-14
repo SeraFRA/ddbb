@@ -43,6 +43,8 @@
 # include <direct.h>
 #else
 # include <sys/stat.h>
+# include <unistd.h>            /* rmdir: su MinGW vive in direct.h,
+                                   su Linux qui — la CI l'ha trovato */
 #endif
 
 #include "motore.h"

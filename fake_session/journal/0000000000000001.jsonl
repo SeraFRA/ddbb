@@ -1,0 +1,3 @@
+{"payload":{"kind":"tool","noise":1}}
+{"payload":{"kind":"completion","request":{"model_input":{"messages":{"messages":[{"role":"assistant","content":[{"type":"reasoning","content":[{"text":"penso al prefetcher speculativo capitolo"}]},{"type":"text","text":"primo pensiero sullo staging"}]}]}}}}}
+{"payload":{"kind":"completion","request":{"model_input":{"messages":{"messages":[{"role":"assistant","content":[{"type":"reasoning","content":[{"text":"penso al prefetcher speculativo capitolo"}]},{"type":"text","text":"secondo pensiero sul filo"}]}]}}}}}
