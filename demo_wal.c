@@ -110,14 +110,14 @@ int main(void)
         motore_t *m = motore_apri();
         motore_avanza(m, 1);
         for (int i = 0; i < 50; i++) {
-            char k[8], v[16];
+            char k[16], v[32];
             snprintf(k, sizeof k, "b%02d", i);
             snprintf(v, sizeof v, "base-%02d", i);
             motore_put(m, k, strlen(k), v, strlen(v), 0);
         }
         motore_salva(m, DB);             /* l'ultimo snapshot: 50 vive */
         for (int i = 0; i < 10; i++) {   /* 10 put SOLO in arena */
-            char k[8], v[16];
+            char k[16], v[32];
             snprintf(k, sizeof k, "x%02d", i);
             snprintf(v, sizeof v, "dopo-%02d", i);
             motore_put(m, k, strlen(k), v, strlen(v), 0);
@@ -147,7 +147,7 @@ int main(void)
         motore_t *m = motore_apri();
         motore_avanza(m, 1);
         for (int i = 0; i < 50; i++) {
-            char k[8], v[16];
+            char k[16], v[32];
             snprintf(k, sizeof k, "b%02d", i);
             snprintf(v, sizeof v, "base-%02d", i);
             motore_put(m, k, strlen(k), v, strlen(v), 0);
@@ -162,7 +162,7 @@ int main(void)
         } else {
             size_t byte_attesi = 0;
             for (int i = 0; i < 200; i++) {          /* le 200 col WAL */
-                char k[8], v[16];
+                char k[16], v[32];
                 snprintf(k, sizeof k, "w%03d", i);
                 snprintf(v, sizeof v, "valore-%03d", i);
                 if (put_con_wal(m, w, k, v, 0) != MOTORE_OK) {
@@ -173,7 +173,7 @@ int main(void)
                 byte_attesi += 21 + strlen(k) + strlen(v);
             }
             for (int i = 0; i < 10; i++) {           /* 10 del sulla base */
-                char k[8];
+                char k[16];
                 snprintf(k, sizeof k, "b%02d", i);
                 del_con_wal(m, w, k);
                 byte_attesi += 21 + strlen(k);
@@ -210,7 +210,7 @@ int main(void)
 
             int esatte = (vive == 239 && dichiarate == 239);
             for (int i = 0; i < 200 && esatte; i++) {
-                char k[8], v[16];
+                char k[16], v[32];
                 snprintf(k, sizeof k, "w%03d", i);
                 snprintf(v, sizeof v, "valore-%03d", i);
                 if (i == 7)
@@ -219,7 +219,7 @@ int main(void)
                     esatte = vive_esatte(m, k, v);
             }
             for (int i = 0; i < 50 && esatte; i++) {
-                char k[8], v[16];
+                char k[16], v[32];
                 snprintf(k, sizeof k, "b%02d", i);
                 snprintf(v, sizeof v, "base-%02d", i);
                 esatte = i < 10 ? vive_esatte(m, k, NULL)
@@ -322,7 +322,7 @@ int main(void)
         motore_salva(m, DB);
         wal_t *w = wal_apri(SEGMENTO);
         for (int i = 0; i < 5; i++) {
-            char k[8], v[16];
+            char k[16], v[32];
             snprintf(k, sizeof k, "s%02d", i);
             snprintf(v, sizeof v, "sana-%02d", i);
             put_con_wal(m, w, k, v, 0);
@@ -347,7 +347,7 @@ int main(void)
 
         int ok = (applicati == 5 && scartati == 50 && record == 5);
         for (int i = 0; i < 5 && ok; i++) {
-            char k[8], v[16];
+            char k[16], v[32];
             snprintf(k, sizeof k, "s%02d", i);
             snprintf(v, sizeof v, "sana-%02d", i);
             ok = vive_esatte(m, k, v);
@@ -391,7 +391,7 @@ int main(void)
         motore_avanza(m, 1);
         wal_t *w = wal_apri(SEGMENTO);
         for (int i = 0; i < 30; i++) {
-            char k[8], v[16];
+            char k[16], v[32];
             snprintf(k, sizeof k, "t%02d", i);
             snprintf(v, sizeof v, "taglio-%02d", i);
             put_con_wal(m, w, k, v, 0);
@@ -448,7 +448,7 @@ int main(void)
             return 1;
         }
         for (int i = 0; i < N_PREZZO; i++) {
-            char k[8], v[16];
+            char k[16], v[32];
             snprintf(k, sizeof k, "n%03d", i);
             snprintf(v, sizeof v, "nuda-%03d", i);
             double a = ora_us();
@@ -458,7 +458,7 @@ int main(void)
         remove(SEGMENTO);
         wal_t *w = wal_apri(SEGMENTO);
         for (int i = 0; i < N_PREZZO; i++) {
-            char k[8], v[16];
+            char k[16], v[32];
             snprintf(k, sizeof k, "q%03d", i);
             snprintf(v, sizeof v, "inchiostro-%03d", i);
             double a = ora_us();
