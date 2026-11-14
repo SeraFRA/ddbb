@@ -50,7 +50,8 @@ What it taught, in one sentence: a human metaphor plus a test that knows how to 
 | 7 | `database_ring.c` | expiry as a PLACE (a ring of ticks) + backshift delete | **timing wheel** (Linux kernel) | batch expiries, amortized O(1) |
 | 8 | `database_quotient.c` | Bloom and quotient filter, the accounting of bits | **Bloom 1970 / Bender 2012** | false positives measured 0.777% vs 0.82% theory |
 | 9 | `database_persist_semantic.c` | the fusion: the semantic answer comes from disk, with the value — featuring the *invariants-first* experiment | — | 0 wrong out of 60000 disk verifications |
-| 11 | `mcp_server.c` + `mcp_stdio.c` | the MCP layer: the engine as a tool for an LLM agent — 9 tools, confidence always declared, batch `presente` | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms of the LLM round-trip |
+| 11 | `mcp_server.c` + `mcp_stdio.c` | the MCP layer: the engine as a tool for an LLM agent — 10 tools, confidence always declared, batch `presente` | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms of the LLM round-trip |
+| 12 | `prefetch.c` + `prefetch_hook.c` | the speculative prefetcher: a pre_agent hook reads the agent's reasoning trace, predicts the keys it will need and stages them next to the engine with a TTL in requests; the MCP server consumes the staging and counts the hits | **speculative prefetch** (the CPU one, applied to the agent's IO) | hit-rate 1.00 on the bench's full wire, threshold 0.50 |
 
 ## The single engine
 
@@ -91,6 +92,20 @@ Positioning, stated honestly: we do not compete with Mem0/Zep/Letta on their pla
 
 And the use that closes the loop: mounted as an MCP server in an agent (Mistral Vibe, for one), the engine becomes natively callable — debugging the project goes through the tool the project provides. The bench stays the measurement; the agent is the testimony.
 
+## The speculative prefetcher: memory that watches the thoughts (chapter 12)
+
+Metaphor: *the CPU prefetches instructions by watching the stream; the database prefetches by watching the agent's reasoning stream.* Extracting costs ~nothing, reasoning costs a lot: so we extract more than needed, now — but into a staging area, not into context: the LLM's window is the expensive resource, what is extracted does not enter until it is needed.
+
+The geometry is two processes and one file:
+
+- **the producer** is the `pre_agent` hook (`prefetch_hook.c`): every turn it receives the prompt, reads the recent reasoning trace from the session journal, predicts up to 4 keys and writes them to an atomic staging file (`<db>.prefetch`, tmp + rename); if it has something, it injects a one-liner handle into the context ("these are also available, confidence 0.4/0.31/0.2") — the agent pulls only what it needs. Fully fail-open: every hook error is silence, the session never stops because of speculation.
+- **the consumer** is the MCP server: every request it consumes the staging (one generation, one consumption), parks the predictions next to the engine and counts them; a successful `get` on a staged key is a **hit**; the `prefetch_stat` tool exposes hit-rate and the byte balance (savings from avoided discoveries minus the cost of the injected handles).
+- **speculation expires on its own**: predictions are born with a TTL of 32 requests and die in amortized O(1) batches — the wrong prefetcher disposes of itself, speculation with built-in forgetting. And the dedup does not prefetch what the agent already has in its trace.
+
+The chapter's post mortem, which is also its lesson: the first version predicted with the engine's `chiedi` — but the engine's grams are **positional** (`pos` enters the hash), so `chiedi` is a fuzzy-PREFIX, not a topic search: it only predicted keys already verbatim in the trace, exactly the ones the dedup discards. Topic similarity lives in the layer: non-positional bigrams, windows of 5 tokens over the last 64, Jaccard with a 0.12 threshold, key scan via `motore_intervallo`. Ephemeral, never a second persistent index.
+
+Numbers from the `demo_prefetch` bench (measured, gate included): `predici` over an 8 KB trace p50 906 µs / p99 1.16 ms — **once per turn**, against the LLM round's 10²..10³ ms; `consuma` p50 61 µs per request; `tocca` (the hit) ~0 µs. The end-to-end gate crosses the MCP wire: hit 1, cost 120 bytes, saving 500 bytes, balance +380, hit-rate 1.00 against a 0.50 threshold — EXIT≠0 if a tool lies about confidence or the balance diverges. And the declared limit: predictions are "maybe" (syntactic similarity on the trace, not semantic), a low hit-rate means speculation pollutes more than it saves — and the number is declared even when it disproves the idea.
+
 ## Build and run
 
 You need `gcc` (MinGW on Windows, gcc on Linux) and `make` (on Windows MSYS2 provides it as `mingw32-make`; by hand: `gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -o motore_demo motore.c demo_motore.c`). No dependencies.
@@ -99,6 +114,8 @@ You need `gcc` (MinGW on Windows, gcc on Linux) and `make` (on Windows MSYS2 pro
 make motore_demo        # the engine + the test bench: a gate for EVERY invariant
 make mcp_server         # the MCP server over stdio: ./mcp_server [file.db [tick]]
 make demo_mcp           # the MCP layer bench: gates [M1]..[M9] + MEASUREMENT
+make prefetch_hook      # the pre_agent hook: ./prefetch_hook [file.db]
+make demo_prefetch      # the prefetcher bench: gates [P1]..[P7] + MEASUREMENT
 make database_quotient  # any chapter, one at a time
 ./motore_demo           # exits with EXIT!=0 if a contract breaks
 ```
@@ -132,16 +149,20 @@ database*.c            # the nine chapters + the original: each builds alone
 motore.h / motore.c    # the single engine (public API, opaque handle)
 demo_motore.c          # the test bench: a gate per invariant
 json.h / json.c        # the minimal JSON parser: one source of truth for the wire
-mcp_server.h / mcp_server.c  # the MCP core: 9 tools, contract [M1]..[M9]
+mcp_server.h / mcp_server.c  # the MCP core: 10 tools, contract [M1]..[M9]
 mcp_stdio.c            # the thin shell: stdin/stdout, one object per line
 demo_mcp.c             # the layer's bench: gates and MEASUREMENT (latency, tokens)
+prefetch.h / prefetch.c      # the speculative prefetcher: contract [P1]..[P9]
+prefetch_hook.c        # the pre_agent hook: trace -> prediction -> staging
+demo_prefetch.c        # the prefetcher bench: gates and MEASUREMENT (hit-rate, balance)
+.vibe/hooks.toml       # the hook mounted: pre_agent, fail-open
 Makefile               # make motore_demo | make mcp_server | make <chapter>
 .gitignore             # binaries and test files stay out of the repo
 ```
 
 ## Where to go next
 
-The engine declares its limits in `motore.c`'s header: single-threaded, stats via `printf` (teaching project), answers alive until the next put. The natural next steps: a WAL between snapshots, `fsync`, stable iterators, concurrency one extreme at a time. And the twelfth chapter, already declared: the speculative prefetcher that watches the agent's reasoning trace — prediction as a semantic query on the trace, staged with a short TTL, hit-rate above a threshold or nothing.
+The engine declares its limits in `motore.c`'s header: single-threaded, stats via `printf` (teaching project), answers alive until the next put. The natural next steps: a WAL between snapshots, `fsync`, stable iterators, concurrency one extreme at a time.
 
 ## License
 

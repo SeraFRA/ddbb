@@ -101,6 +101,10 @@ Per l'AI che ci lavora e per l'umano che la guida. Nasce da dieci capitoli
 - Su Windows il Device Guard può bloccare le exe appena compilate nella
   cartella del progetto (exit 126): attendere alcuni secondi, o compilare
   fuori dalla cartella.
+- **L'hook `pre_agent`** (`.vibe/hooks.toml` → `prefetch_hook`, capitolo 12)
+  gira a ogni turno e parla col motore: se si rompe `prefetch.c`, l'hook
+  tace (fail-open, per contratto) ma `demo_prefetch` in CI diventa rosso.
+  Lo staging (`*.prefetch`) è un derivato: gitignored, mai nel repo.
 - **La memoria di lavoro** vive nel motore via MCP (server `motore`,
   file `memoria.db`, gitignored). Il repo è la verità durevole e la
   memoria NON la duplica: dentro va ciò che non è ancora nel repo —

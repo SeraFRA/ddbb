@@ -1,0 +1,13 @@
+# Hook del capitolo 12: il prefetcher speculativo.
+# pre_agent = il produttore: legge la traccia del ragionamento (journal +
+# prompt), predice le chiavi che serviranno, le parcheggia in staging
+# atomico (<db>.prefetch) e inietta handle one-liner nel contesto.
+# Il consumatore e' il server MCP (mcp_server), che consuma lo staging a
+# ogni richiesta e conta hit/morte. Fail-open: ogni errore dell'hook e'
+# silenzio, la sessione non si ferma mai per colpa della speculazione.
+[[hooks]]
+name = "prefetch"
+type = "pre_agent"
+command = "./prefetch_hook memoria.db"
+timeout = 10.0
+description = "Prefetch speculativo: predice le chiavi del motore dalla traccia dei pensieri"

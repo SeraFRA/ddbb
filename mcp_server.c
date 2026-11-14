@@ -80,6 +80,7 @@
 #include "motore.h"
 #include "mcp_server.h"
 #include "json.h"
+#include "prefetch.h"
 
 #define MCP_SPEC        "2025-06-18"
 #define SERVER_NOME     "motore-pdb"
@@ -94,6 +95,10 @@ struct mcp {
     motore_t *mo;
     uint64_t  richieste;
     uint64_t  byte_payload;
+    /* il parcheggio del prefetcher (capitolo 12): vive dove vive
+     * il motore, consuma lo staging derivato dal db [P3][P6] */
+    prefetch_parcheggio_t *pf;
+    char      staging[512];
 };
 
 /* ------------------------------------------------------------- utilita' */
@@ -111,6 +116,11 @@ mcp_t *mcp_apri(const char *percorso_db, uint32_t adesso, size_t *scartate)
             free(s);
             return NULL;
         }
+        /* lo staging e' un derivato del db: una regola sola [P3] */
+        prefetch_percorso_staging(percorso_db, s->staging,
+                                  sizeof s->staging);
+        s->pf = prefetch_parcheggio_apri(PREFETCH_PARCHEGGIO_MAX,
+                                         PREFETCH_TTL_RICHIESTE);
     } else {
         s->mo = motore_apri();
         if (!s->mo) {
@@ -126,6 +136,7 @@ void mcp_chiudi(mcp_t *s)
 {
     if (!s)
         return;
+    prefetch_parcheggio_chiudi(s->pf);
     motore_chiudi(s->mo);
     free(s);
 }
@@ -224,6 +235,10 @@ static int tool_get(mcp_t *s, const jval_t *arg, jbuf_t *out)
         JBUF_LIT(out, "null");        /* il silenzio e' onesto [M4] */
         return 0;
     }
+    /* il colpo del prefetcher [P7]: get con valore di una chiave
+     * parcheggiata e viva. Contato una volta sola, qui. */
+    if (s->pf)
+        prefetch_tocca(s->pf, chiave, kl, s->richieste);
     motore_risposta_t r;
     r.chiave     = (const uint8_t *)chiave;
     r.chiave_len = (uint32_t)kl;
@@ -388,6 +403,46 @@ static int tool_salva(mcp_t *s, const jval_t *arg, jbuf_t *out)
     return 0;
 }
 
+/* la MISURA del capitolo 12 [P8]: numeri, niente prosa. Il gate e'
+ * dell'agente che legge: hit_rate basso = la speculazione inquina
+ * piu' di quanto risparmia, e il dato e' onesto anche quando
+ * smentisce l'idea. */
+static int tool_prefetch_stat(mcp_t *s, const jval_t *arg, jbuf_t *out)
+{
+    (void)arg;                            /* la misura non prende ordini */
+    if (!s->pf) {
+        payload_errore(out, -32602,
+                       "il parcheggio vive solo su un db da file");
+        return 1;
+    }
+    uint64_t parcheggiate = 0, vive = 0, hit = 0, morte = 0;
+    uint64_t spesa = 0, risparmio = 0;
+    prefetch_stat(s->pf, s->richieste, &parcheggiate, &vive, &hit,
+                  &morte, &spesa, &risparmio);
+    JBUF_LIT(out, "{\"parcheggiate\":");
+    jbuf_num(out, (double)parcheggiate);
+    JBUF_LIT(out, ",\"vive\":");
+    jbuf_num(out, (double)vive);
+    JBUF_LIT(out, ",\"hit\":");
+    jbuf_num(out, (double)hit);
+    JBUF_LIT(out, ",\"morte\":");
+    jbuf_num(out, (double)morte);
+    JBUF_LIT(out, ",\"hit_rate\":");
+    if (parcheggiate > 0)
+        jbuf_num(out, (double)hit / (double)parcheggiate);
+    else
+        JBUF_LIT(out, "null");        /* nessuna predizione: nessun
+                                          tasso, non zero finto [M4] */
+    JBUF_LIT(out, ",\"spesa_handle\":");
+    jbuf_num(out, (double)spesa);
+    JBUF_LIT(out, ",\"risparmio\":");
+    jbuf_num(out, (double)risparmio);
+    JBUF_LIT(out, ",\"bilancio\":");
+    jbuf_num(out, (double)(risparmio - spesa));
+    JBUF_LIT(out, "}");
+    return 0;
+}
+
 /* --------------------------------------------- il catalogo dei tool [M8] */
 
 typedef int (*tool_fn)(mcp_t *, const jval_t *, jbuf_t *);
@@ -486,6 +541,18 @@ static const tool_t CATALOGO[] = {
   "\"nome\":{\"type\":\"string\"}"
   "},\"required\":[\"nome\"]}",
   tool_salva },
+
+{ "prefetch_stat",
+  "La MISURA del prefetcher speculativo (capitolo 12): quante "
+  "predizioni parcheggiate, quante vive, quanti colpi (get di una "
+  "chiave parcheggiata), quante morte senza colpo (inquinamento), "
+  "hit_rate, e il bilancio in byte (risparmio delle scoperte evitate "
+  "meno spesa degli handle iniettati). LIMITI: le predizioni vengono "
+  "dalla similarita' SINTATTICA della traccia di ragionamento, non "
+  "semantica; hit_rate basso = la speculazione costa piu' di quanto "
+  "risparmia: il dato e' onesto anche quando smentisce.",
+  "{\"type\":\"object\",\"properties\":{}}",
+  tool_prefetch_stat },
 };
 
 #define N_TOOL (sizeof CATALOGO / sizeof CATALOGO[0])
@@ -563,6 +630,12 @@ int mcp_gestisci(mcp_t *s, const char *richiesta, size_t len,
 
     jval_t *root = json_parse(richiesta, len);
     s->richieste++;
+
+    /* la consumazione dello staging [P3][P6]: un file piccolo per
+     * richiesta, l'orologio e' il contatore qui sopra. Il costo e'
+     * dichiarato nel banco del capitolo 12. */
+    if (s->pf)
+        prefetch_consuma(s->pf, s->staging, s->richieste);
 
     if (!root) {
         risposta_errore(&b, NULL, -32700, "JSON non valido");

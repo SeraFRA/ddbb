@@ -50,7 +50,8 @@ Cosa ha insegnato, in una frase: una metafora umana più un test che sa fallire 
 | 7 | `database_ring.c` | la scadenza come LUOGO (anello di tick) + delete a backshift | **timing wheel** (kernel Linux) | scadenze in batch, O(1) ammortizzato |
 | 8 | `database_quotient.c` | Bloom e quotient filter, la contabilità dei bit | **Bloom 1970 / Bender 2012** | falsi positivi misurati 0.777% vs 0.82% di teoria |
 | 9 | `database_persist_semantic.c` | la fusione: la risposta semantica viene dal disco, col valore — con l'esperimento *invariants-first* | — | 0 sbagliate su 60000 verifiche dal disco |
-| 11 | `mcp_server.c` + `mcp_stdio.c` | il layer MCP: il motore come strumento per un agente LLM — 9 tool, confidenza sempre dichiarata, `presente` batch | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms del giro LLM |
+| 11 | `mcp_server.c` + `mcp_stdio.c` | il layer MCP: il motore come strumento per un agente LLM — 10 tool, confidenza sempre dichiarata, `presente` batch | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms del giro LLM |
+| 12 | `prefetch.c` + `prefetch_hook.c` | il prefetcher speculativo: un hook pre_agent legge la traccia dei pensieri dell'agente, predice le chiavi che serviranno e le parcheggia accanto al motore con TTL in richieste; il server MCP consuma lo staging e conta i colpi | **prefetch speculativo** (quello delle CPU, applicato all'IO dell'agente) | hit-rate 1.00 sul filo intero del banco, soglia 0.50 |
 
 ## Il motore unico
 
@@ -91,6 +92,20 @@ Posizionamento, detto onestamente: non competiamo con Mem0/Zep/Letta sul loro pi
 
 E l'uso che chiude il cerchio: montato come MCP server in un agente (per esempio Mistral Vibe), il motore diventa nativamente chiamabile — il debugging del progetto passa dallo strumento che il progetto fornisce. Il banco resta la misura; l'agente è la testimonianza.
 
+## Il prefetcher speculativo: la memoria che guarda i pensieri (capitolo 12)
+
+Metafora: *la CPU prefetcha le istruzioni guardando lo stream; il database prefetcha guardando lo stream di ragionamento dell'agente.* Estrarre costa ~zero, ragionare costa caro: allora estraiamo più di quanto serve, adesso — ma in parcheggio, non in contesto: la finestra dell'LLM è la risorsa cara, ciò che è estratto non entra finché non serve.
+
+La geometria è due processi e un file:
+
+- **il produttore** è l'hook `pre_agent` (`prefetch_hook.c`): a ogni turno riceve il prompt, legge la traccia dei pensieri recenti dal journal della sessione, predice fino a 4 chiavi e le scrive in uno staging atomico (`<db>.prefetch`, tmp + rename); se ha qualcosa, inietta nel contesto un handle one-liner ("disponibili anche questi, confidenza 0.4/0.31/0.2") — l'agente tira solo ciò che gli serve. Fail-open totale: ogni errore dell'hook è silenzio, la sessione non si ferma mai per colpa della speculazione.
+- **il consumatore** è il server MCP: a ogni richiesta consuma lo staging (una generazione, una consumazione), parcheggia le predizioni accanto al motore e le conta; una `get` riuscita su una chiave parcheggiata è un **colpo**; il tool `prefetch_stat` espone hit-rate e bilancio in byte (risparmio delle scoperte evitate meno spesa degli handle iniettati).
+- **la speculazione scade da sola**: le predizioni nascono con TTL di 32 richieste e muoiono in batch O(1) ammortizzato — il prefetcher sbagliato si smaltisce da sé, speculazione con oblio incorporato. E il dedup non prefetcha ciò che l'agente ha già in traccia.
+
+Il post mortem del capitolo, che è anche la sua lezione: la prima versione prediceva con `chiedi` del motore — ma i grammi del motore sono **posizionali** (`pos` entra nell'hash), quindi `chiedi` è un fuzzy-PREFIX, non una ricerca per tema: prediceva solo le chiavi già verbatim nella traccia, proprio quelle che il dedup scarta. La similarità per tema vive nel layer: bigrammi non posizionali, finestre di 5 token sulle ultime 64, Jaccard con soglia 0.12, scan delle chiavi via `motore_intervallo`. Effimera, mai un secondo indice persistente.
+
+I numeri del banco `demo_prefetch` (misurati, gate incluso): `predici` su 8 KB di traccia p50 906 µs / p99 1.16 ms — **una volta per turno**, contro i 10²..10³ ms del giro LLM; `consuma` p50 61 µs a ogni richiesta; `tocca` (il colpo) ~0 µs. Il gate end-to-end attraversa il filo MCP: hit 1, spesa 120 byte, risparmio 500 byte, bilancio +380, hit-rate 1.00 contro soglia 0.50 — EXIT≠0 se un tool mente sulla confidenza o se il bilancio diverge. E il limite dichiarato: le predizioni sono "forse" (similarità sintattica sulla traccia, non semantica), l'hit-rate basso significa che la speculazione inquina più di quanto risparmia — e il dato si dichiara anche quando smentisce l'idea.
+
 ## Compilare ed eseguire
 
 Serve `gcc` (MinGW su Windows, gcc su Linux) e `make` (su Windows lo porta MSYS2 come `mingw32-make`; a mano: `gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -o motore_demo motore.c demo_motore.c`). Niente dipendenze.
@@ -99,6 +114,8 @@ Serve `gcc` (MinGW su Windows, gcc su Linux) e `make` (su Windows lo porta MSYS2
 make motore_demo        # il motore + il banco di prova: gate per OGNI invariante
 make mcp_server         # il server MCP su stdio: ./mcp_server [file.db [tick]]
 make demo_mcp           # il banco del layer MCP: gate [M1]..[M9] + MISURA
+make prefetch_hook      # l'hook pre_agent: ./prefetch_hook [file.db]
+make demo_prefetch      # il banco del prefetcher: gate [P1]..[P7] + MISURA
 make database_quotient  # qualunque capitolo, uno per volta
 ./motore_demo           # esce con EXIT!=0 se un contratto salta
 ```
@@ -132,16 +149,20 @@ database*.c            # i nove capitoli + l'originale: ognuno si compila da sol
 motore.h / motore.c    # il motore unico (API pubblica, handle opaco)
 demo_motore.c          # il banco di prova: gate a ogni invariante
 json.h / json.c        # il parser JSON minimale: una fonte di verita' per il filo
-mcp_server.h / mcp_server.c  # il nucleo MCP: 9 tool, contratto [M1]..[M9]
+mcp_server.h / mcp_server.c  # il nucleo MCP: 10 tool, contratto [M1]..[M9]
 mcp_stdio.c            # il guscio sottile: stdin/stdout, un oggetto per riga
 demo_mcp.c             # il banco del layer: gate e MISURA (latenze, token)
+prefetch.h / prefetch.c      # il prefetcher speculativo: contratto [P1]..[P9]
+prefetch_hook.c        # l'hook pre_agent: traccia -> predizione -> staging
+demo_prefetch.c        # il banco del prefetcher: gate e MISURA (hit-rate, bilancio)
+.vibe/hooks.toml       # l'hook montato: pre_agent, fail-open
 Makefile               # make motore_demo | make mcp_server | make <capitolo>
 .gitignore             # eseguibili e file di prova non entrano nel repo
 ```
 
 ## Dove proseguire
 
-Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. I passi naturali dopo: WAL tra snapshot e snapshot, `fsync`, iteratori stabili, concorrenza a un'estremo per volta. E il capitolo dodicesimo già dichiarato: il prefetcher speculativo che guarda la traccia dei pensieri dell'agente — la predizione come query semantica sulla traccia, in parcheggio con TTL corto, hit-rate sotto soglia o niente.
+Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. I passi naturali dopo: WAL tra snapshot e snapshot, `fsync`, iteratori stabili, concorrenza a un'estremo per volta.
 
 ## Licenza
 

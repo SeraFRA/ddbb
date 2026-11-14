@@ -247,8 +247,8 @@ int main(void)
     printf("[M8] tools/list: i limiti dichiarati nella description...\n");
     r = chiama(s, "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
     const jval_t *tools = json_get(json_get(r, "result"), "tools");
-    if (!tools || tools->tipo != J_ARR || tools->n != 9) {
-        fprintf(stderr, "GATE ROTTO: attesi 9 tool, trovati %zu\n",
+    if (!tools || tools->tipo != J_ARR || tools->n != 10) {
+        fprintf(stderr, "GATE ROTTO: attesi 10 tool, trovati %zu\n",
                 tools ? tools->n : (size_t)0);
         return 1;
     }

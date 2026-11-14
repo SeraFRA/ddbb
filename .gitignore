@@ -9,3 +9,6 @@ mcp_server
 demo_mcp
 Thumbs.db
 .DS_Store
+*.prefetch
+prefetch_hook
+demo_prefetch
