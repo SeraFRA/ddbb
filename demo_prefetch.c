@@ -531,6 +531,43 @@ int main(void)
     json_libera(r);
     mcp_chiudi(s);
 
+    /* il lato onesto del bilancio: parcheggio VERGINE, predizioni
+     * consumate e MAI chieste — la spesa vince e il numero deve
+     * essere -spesa, esatto. (Il giro unsigned di 2^64 viveva qui:
+     * 1.8e19 invece di -90 — il caso che la sessione vera ha
+     * prodotto per primo, perché il banco testava solo il colpo.) */
+    if (prefetch_scrivi_staging(percorso_staging, "turn-e2e-solo-spesa",
+                                due, 1, 90) != 0) {
+        fprintf(stderr, "GATE [P6] ROTTO: staging solo-spesa fallito\n");
+        return 1;
+    }
+    mcp_t *s2 = mcp_apri("banco12.db", 1, NULL);
+    if (!s2) {
+        fprintf(stderr, "memoria MCP vergine\n");
+        return 1;
+    }
+    r = tool(s2, "audit", "{}");         /* una richiesta qualsiasi:
+                                            consuma e parcheggia */
+    json_libera(r);
+    r = tool(s2, "prefetch_stat", "{}");
+    int bv2 = 0;
+    double bilancio2 = json_num(json_get(r, "bilancio"), &bv2);
+    int hv2 = 0;
+    uint64_t hit2 = (uint64_t)json_num(json_get(r, "hit"), &hv2);
+    if (!bv2 || !hv2) {
+        fprintf(stderr, "GATE [P6] ROTTO: stat solo-spesa senza numeri\n");
+        return 1;
+    }
+    if (hit2 != 0 || bilancio2 != -90.0) {
+        fprintf(stderr, "GATE [P6] ROTTO: senza colpi il bilancio"
+                        " deve essere -90, non %.4g\n", bilancio2);
+        return 1;
+    }
+    printf("     senza colpi: bilancio %.0f (la spesa vince,"
+           " e lo dichiara)\n", bilancio2);
+    json_libera(r);
+    mcp_chiudi(s2);
+
     /* ---- [P7] la traccia esce dal journal della sessione */
     printf("[P7] il journal: i pensieri recenti, dedup, dal vecchio"
            " al nuovo...\n");

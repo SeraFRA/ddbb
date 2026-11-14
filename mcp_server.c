@@ -438,7 +438,10 @@ static int tool_prefetch_stat(mcp_t *s, const jval_t *arg, jbuf_t *out)
     JBUF_LIT(out, ",\"risparmio\":");
     jbuf_num(out, (double)risparmio);
     JBUF_LIT(out, ",\"bilancio\":");
-    jbuf_num(out, (double)(risparmio - spesa));
+    /* il bilancio e' SIGNED: senza colpi la spesa vince, e il
+     * numero deve dirlo (risparmio - spesa tra uint64_t faceva
+     * il giro di 2^64: 1.8e19 invece di -108 — post mortem) */
+    jbuf_num(out, (double)((int64_t)risparmio - (int64_t)spesa));
     JBUF_LIT(out, "}");
     return 0;
 }
