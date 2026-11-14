@@ -26,10 +26,8 @@
 #define DB      "banco_wal.db"
 #define SEGMENTO "banco_wal.db.wal"
 
-#if defined(_WIN32)
+#ifdef _WIN32
 #include <windows.h>
-#else
-#include <unistd.h>                     /* unlink su Linux (lezione cap. 12) */
 #endif
 
 static double ora_us(void)

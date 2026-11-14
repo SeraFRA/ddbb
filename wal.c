@@ -21,6 +21,8 @@
 #define tronca(f, pos)   (_chsize_s(_fileno((f)), (long long)(pos)) == 0 \
                           ? 0 : -1)
 #else
+#include <sys/types.h>                  /* off_t: la CI ha scoperto che
+                                         * unistd.h non basta (gcc 15) */
 #include <unistd.h>
 #define sincronizza(fd)  fsync((fd))
 #define tronca(f, pos)   (ftruncate(fileno((f)), (off_t)(pos)) == 0 \
