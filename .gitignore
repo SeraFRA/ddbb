@@ -10,5 +10,7 @@ demo_mcp
 Thumbs.db
 .DS_Store
 *.prefetch
+*.staging
+fake_session/
 prefetch_hook
 demo_prefetch
