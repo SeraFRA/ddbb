@@ -7,6 +7,17 @@
 motore_demo
 mcp_server
 demo_mcp
+demo_wal
+misura_fsync
+database_debug
+database_indexed
+database_compact
+database_persist
+database_learned
+database_semantic
+database_ring
+database_quotient
+database_persist_semantic
 Thumbs.db
 .DS_Store
 *.prefetch

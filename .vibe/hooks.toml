@@ -5,9 +5,14 @@
 # Il consumatore e' il server MCP (mcp_server), che consuma lo staging a
 # ogni richiesta e conta hit/morte. Fail-open: ogni errore dell'hook e'
 # silenzio, la sessione non si ferma mai per colpa della speculazione.
+# Nota tecnica: su Windows il comando sceglie l'.exe esplicitamente.
+# Senza questo if, una build WSL nella cartella lascia un binario ELF
+# senza estensione che Git Bash esegue al posto dell'.exe (Exec format
+# error, l'hook ammutolisce per fail-open). Su Linux l'.exe non c'e'
+# e gira il binario nativo.
 [[hooks]]
 name = "prefetch"
 type = "pre_agent"
-command = "./prefetch_hook memoria.db"
+command = "if [ -f ./prefetch_hook.exe ]; then ./prefetch_hook.exe memoria.db; else ./prefetch_hook memoria.db; fi"
 timeout = 10.0
 description = "Prefetch speculativo: predice le chiavi del motore dalla traccia dei pensieri"
