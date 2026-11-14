@@ -27,6 +27,7 @@ jobs:
           database_persist database_learned database_semantic
           database_ring database_quotient database_persist_semantic
           motore_demo mcp_server demo_mcp prefetch_hook demo_prefetch
+          demo_wal misura_fsync
 
       - name: collaudo del motore (ASan + UBSan)
         run: |
@@ -39,8 +40,15 @@ jobs:
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
               -fsanitize=address,undefined -fno-sanitize-recover=all \
-              -o mcp_asan demo_mcp.c mcp_server.c json.c motore.c prefetch.c -lm
+              -o mcp_asan demo_mcp.c mcp_server.c json.c motore.c prefetch.c wal.c -lm
           ./mcp_asan
+
+      - name: collaudo del WAL (ASan + UBSan)
+        run: |
+          gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
+              -fsanitize=address,undefined -fno-sanitize-recover=all \
+              -o wal_asan demo_wal.c wal.c motore.c -lm
+          ./wal_asan
 
       - name: collaudo del prefetcher speculativo (ASan + UBSan)
         run: |
@@ -68,7 +76,8 @@ jobs:
           for b in database_debug database_indexed database_compact \
                    database_persist database_learned database_semantic \
                    database_ring database_quotient \
-                   database_persist_semantic motore_demo demo_mcp demo_prefetch; do
+                   database_persist_semantic motore_demo demo_mcp \
+                   demo_prefetch demo_wal misura_fsync; do
             echo "=== $b ==="
             if ./$b; then
               echo "--- $b: verde"

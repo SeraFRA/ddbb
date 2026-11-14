@@ -839,7 +839,40 @@ int main(void)
                forse, 100.0 * forse / 32.0);
         json_libera(p);
     }
+
+    /* ---- il WAL dal filo (capitolo 13): la put DOPO il salva
+     * sopravvive al crash senza salva, perche' e' inchiostrata nel
+     * segmento [W1][W2]. Il crash e' il mcp_chiudi senza salva. */
+    printf("[W1] il WAL parlato via MCP: put dopo il salva, crash, replay...\n");
+    {
+        jval_t *p = tool(s, "put",
+                         "{\"chiave\":\"dopo-salva\",\"valore\":\"sopravvive\"}");
+        if (!e_vero(p, "scritto")) {
+            fprintf(stderr, "GATE ROTTO: la put dopo il salva fallisce\n");
+            return 1;
+        }
+        json_libera(p);
+    }
+    mcp_chiudi(s);                       /* il crash: nessun salva */
+    {
+        s = mcp_apri("banco_mcp.db", 0, NULL);
+        if (!s) {
+            fprintf(stderr, "GATE ROTTO: il ricaricato col WAL non apre\n");
+            return 1;
+        }
+        jval_t *p = tool(s, "get", "{\"chiave\":\"dopo-salva\"}");
+        const char *v = json_str(json_get(p, "valore"), &vl);
+        if (!v || strcmp(v, "sopravvive") != 0) {
+            fprintf(stderr, "GATE [W1] ROTTO: la put inchiostrata non"
+                            " sopravvive al crash\n");
+            return 1;
+        }
+        printf("     la put era solo nel WAL: il replay l'ha riapplicata"
+               " — nessun salva in mezzo\n");
+        json_libera(p);
+    }
     remove("banco_mcp.db");
+    remove("banco_mcp.db.wal");
 
     mcp_chiudi(s);
     printf("\nTUTTI I GATE VERDI: il motore e' uno strumento onesto.\n");

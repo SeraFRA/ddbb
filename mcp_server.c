@@ -81,6 +81,7 @@
 #include "mcp_server.h"
 #include "json.h"
 #include "prefetch.h"
+#include "wal.h"
 
 #define MCP_SPEC        "2025-06-18"
 #define SERVER_NOME     "motore-pdb"
@@ -99,6 +100,11 @@ struct mcp {
      * il motore, consuma lo staging derivato dal db [P3][P6] */
     prefetch_parcheggio_t *pf;
     char      staging[512];
+    /* il write-ahead log (capitolo 13): la durabilita' fra due salva.
+     * Vive accanto al db (<db>.wal), e si taglia quando lo snapshot
+     * torna SULLO STESSO file [W5] */
+    wal_t    *wal;
+    char      percorso_db[512];
 };
 
 /* ------------------------------------------------------------- utilita' */
@@ -116,6 +122,35 @@ mcp_t *mcp_apri(const char *percorso_db, uint32_t adesso, size_t *scartate)
             free(s);
             return NULL;
         }
+        if (strlen(percorso_db) >= sizeof s->percorso_db) {
+            motore_chiudi(s->mo);
+            free(s);
+            return NULL;
+        }
+        strcpy(s->percorso_db, percorso_db);
+        /* il WAL vive accanto al db (capitolo 13): prima si riavvolge
+         * il log, poi si serve. Fail-closed: se il segmento non si puo'
+         * aprire non si promette durabilita' che non si ha */
+        char percorso_wal[512 + 8];
+        snprintf(percorso_wal, sizeof percorso_wal, "%s.wal", percorso_db);
+        s->wal = wal_apri(percorso_wal);
+        if (!s->wal) {
+            motore_chiudi(s->mo);
+            free(s);
+            return NULL;
+        }
+        size_t scarti_wal = 0;
+        size_t applicati = wal_riavvolgi(s->wal, s->mo, &scarti_wal);
+        if (applicati == (size_t)-1) {
+            fprintf(stderr, "[mcp] WAL illeggibile: non parto senza "
+                            "durabilita'\n");
+            mcp_chiudi(s);
+            return NULL;
+        }
+        if (applicati > 0 || scarti_wal > 0)
+            fprintf(stderr, "[mcp] WAL: %zu record riapplicati, %zu byte "
+                            "di coda non valida troncati [W3]\n",
+                    applicati, scarti_wal);
         /* lo staging e' un derivato del db: una regola sola [P3] */
         prefetch_percorso_staging(percorso_db, s->staging,
                                   sizeof s->staging);
@@ -136,6 +171,7 @@ void mcp_chiudi(mcp_t *s)
 {
     if (!s)
         return;
+    wal_chiudi(s->wal);
     prefetch_parcheggio_chiudi(s->pf);
     motore_chiudi(s->mo);
     free(s);
@@ -208,6 +244,20 @@ static int tool_put(mcp_t *s, const jval_t *arg, jbuf_t *out)
         ttl = 0;
     if (ttl < 0 || ttl > 4294967295.0) {
         payload_errore(out, -32602, "ttl fuori range (0..4294967295)");
+        return 1;
+    }
+    /* la finestra dell'anello si verifica PRIMA dell'inchiostro: il WAL
+     * non deve mai custodire un'intenzione che il motore rifiuterebbe */
+    if (ttl > TTL_FINESTRA) {
+        payload_errore(out, MOTORE_ERR_TTL, msg_motore(MOTORE_ERR_TTL));
+        return 1;
+    }
+    /* il log viene PRIMA del motore [W1]: un crash fra i due riapplica,
+     * il contrario perderebbe la put accettata */
+    if (s->wal && wal_put(s->wal, chiave, kl, valore, vl,
+                          (uint32_t)ttl, motore_adesso(s->mo)) != WAL_OK) {
+        payload_errore(out, MOTORE_ERR_IO,
+                        "WAL non scrivibile: put rifiutata (durabilita' o niente)");
         return 1;
     }
     int r = motore_put(s->mo, chiave, kl, valore, vl, (uint32_t)ttl);
@@ -345,6 +395,14 @@ static int tool_del(mcp_t *s, const jval_t *arg, jbuf_t *out)
         payload_errore(out, -32602, "serve chiave (stringa)");
         return 1;
     }
+    /* il tombstone si inchiostra prima [W1]; al replay il DEL di una
+     * chiave assente e' legale: puo' essere scaduta per conto suo [W5] */
+    if (s->wal && wal_del(s->wal, chiave, kl,
+                          motore_adesso(s->mo)) != WAL_OK) {
+        payload_errore(out, MOTORE_ERR_IO,
+                        "WAL non scrivibile: delete rifiutata (durabilita' o niente)");
+        return 1;
+    }
     int r = motore_del(s->mo, chiave, kl);
     if (r != MOTORE_OK) {
         payload_errore(out, r, msg_motore(r));
@@ -398,6 +456,16 @@ static int tool_salva(mcp_t *s, const jval_t *arg, jbuf_t *out)
     if (r != MOTORE_OK) {
         payload_errore(out, r, msg_motore(r));
         return 1;
+    }
+    /* il taglio del WAL viene DOPO lo snapshot, e SOLO se lo snapshot
+     * e' tornato sullo stesso file che il WAL custodisce [W5]: salvare
+     * altrove non taglia il log di un altro db */
+    if (s->wal && strcmp(nome, s->percorso_db) == 0) {
+        if (wal_taglia(s->wal) != WAL_OK) {
+            payload_errore(out, MOTORE_ERR_IO,
+                           "snapshot salvato ma WAL non tagliato: riprova il salva");
+            return 1;
+        }
     }
     JBUF_LIT(out, "{\"salvato\":true}");
     return 0;

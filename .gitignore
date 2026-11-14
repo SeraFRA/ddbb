@@ -14,3 +14,6 @@ Thumbs.db
 fake_session/
 prefetch_hook
 demo_prefetch
+
+# il segmento del WAL (capitolo 13): derivato del db, mai nel repo
+*.wal

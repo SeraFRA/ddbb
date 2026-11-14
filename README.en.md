@@ -52,6 +52,7 @@ What it taught, in one sentence: a human metaphor plus a test that knows how to 
 | 9 | `database_persist_semantic.c` | the fusion: the semantic answer comes from disk, with the value — featuring the *invariants-first* experiment | — | 0 wrong out of 60000 disk verifications |
 | 11 | `mcp_server.c` + `mcp_stdio.c` | the MCP layer: the engine as a tool for an LLM agent — 10 tools, confidence always declared, batch `presente` | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms of the LLM round-trip |
 | 12 | `prefetch.c` + `prefetch_hook.c` | the speculative prefetcher: a pre_agent hook reads the agent's reasoning trace, predicts the keys it will need and stages them next to the engine with a TTL in requests; the MCP server consumes the staging and counts the hits | **speculative prefetch** (the CPU one, applied to the agent's IO) | hit-rate 1.00 on the bench's full wire, threshold 0.50 |
+| 13 | `wal.c` + `misura_fsync.c` | the write-ahead log: intents are inked one by one (fwrite+fflush+fsync) before touching the engine; the replay rebuilds everything between two snapshots, the rotten tail is truncated | **WAL** (Bitcask, Postgres, SQLite) | 216 µs per durable put (p50), the replay is exact: 212/212 |
 
 ## The single engine
 
@@ -106,6 +107,21 @@ The chapter's post mortem, which is also its lesson: the first version predicted
 
 Numbers from the `demo_prefetch` bench (measured, gate included): `predici` over an 8 KB trace p50 906 µs / p99 1.16 ms — **once per turn**, against the LLM round's 10²..10³ ms; `consuma` p50 61 µs per request; `tocca` (the hit) ~0 µs. The end-to-end gate crosses the MCP wire: hit 1, cost 120 bytes, saving 500 bytes, balance +380, hit-rate 1.00 against a 0.50 threshold — EXIT≠0 if a tool lies about confidence or the balance diverges. And the declared limit: predictions are "maybe" (syntactic similarity on the trace, not semantic), a low hit-rate means speculation pollutes more than it saves — and the number is declared even when it disproves the idea.
 
+## The write-ahead log: memory that survives the crash (chapter 13)
+
+Metaphor: *the ship's logbook.* The ship may sink at any wave, but the logbook is written line by line and each line is inked before the next: whoever reads it rebuilds the voyage up to the last readable line. The pain, numbered in the bench: every `salva` rewrites the whole file (64 ms at 50k keys) and between two saves everything lives only in the arena — a crash loses everything since the last snapshot.
+
+The mechanics are one append-only file next to the db (`<db>.wal`), with contract [W1]..[W6] written before the code in `wal.h`:
+
+- **the log comes first** [W1]: the layer writes the record BEFORE touching the engine — a crash in between re-applies at replay, the other way around would lose the accepted put.
+- **the durability trittico** [W2]: `fwrite + fflush + fsync` per record. The chapter's post mortem lives in the measurement itself: fsync without fflush synchronizes a kernel that does not have the bytes yet (still in the process buffer) — the first measurement said 70 µs, the honest one 216 µs. The durability policy is closed by the numbers of `misura_fsync`, not by taste: fsync per put (216 µs, invisible at agent pace), group commit excluded because its batch NEVER fills at that pace — it would degenerate into "fsync only at save", i.e. no WAL at all.
+- **the prefix is safe** [W3]: CRC-32 per record (chapter 4's contract): a broken record stops the replay right there, only the not-yet-inked tail is lost — and the rotten tail is **truncated**, because a new record must never land behind a tail the replay would never read.
+- **the tick is in the record** [W4]: the replay rebuilds each entry's `nato` — TTLs come back with their true time, not the loading time. Declared limit: loading the snapshot at a tick above the records extends the replayed TTLs (the tick inside the PDB1 file is format v2, in the morgue).
+- **cut after the snapshot, never before** [W5]: the WAL lives between two `salva`; a crash between snapshot and cut re-applies the last batch (idempotent), the other way around would lose it.
+- **one writer** [W6]: single-threaded by contract, like the engine.
+
+Numbers from the `demo_wal` bench (measured, gate included): exact replay of 212/212 records (200 puts + 12 deletes, one of them on a never-existing key — legal), 239 live entries rebuilt with 199 values verified one by one; the replayed TTL born at tick 1 dies at tick 6 like the live one; 50 bytes of rotten tail discarded, declared and truncated; the cut after the snapshot zeroes the segment and the next replay applies only the new batch. The price: naked put p50 0.90 µs vs inked put p50 212 µs — a 236x ratio, and at 200 puts the WAL costs 42 ms in total: durability is not free, and the bench says so instead of hiding it. From the MCP wire (`demo_mcp`): the put after the save survives the crash with no save in between — gate [W1] crosses the full wire.
+
 ## Build and run
 
 You need `gcc` (MinGW on Windows, gcc on Linux) and `make` (on Windows MSYS2 provides it as `mingw32-make`; by hand: `gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -o motore_demo motore.c demo_motore.c`). No dependencies.
@@ -155,6 +171,9 @@ demo_mcp.c             # the layer's bench: gates and MEASUREMENT (latency, toke
 prefetch.h / prefetch.c      # the speculative prefetcher: contract [P1]..[P9]
 prefetch_hook.c        # the pre_agent hook: trace -> prediction -> staging
 demo_prefetch.c        # the prefetcher bench: gates and MEASUREMENT (hit-rate, balance)
+wal.h / wal.c          # the write-ahead log: contract [W1]..[W6], the exact replay
+demo_wal.c             # the WAL bench: simulated crashes, rotten tail, the cut
+misura_fsync.c          # the MEASUREMENT that closed the durability decision
 .vibe/hooks.toml       # the hook mounted: pre_agent, fail-open
 Makefile               # make motore_demo | make mcp_server | make <chapter>
 .gitignore             # binaries and test files stay out of the repo
@@ -162,7 +181,7 @@ Makefile               # make motore_demo | make mcp_server | make <chapter>
 
 ## Where to go next
 
-The engine declares its limits in `motore.c`'s header: single-threaded, stats via `printf` (teaching project), answers alive until the next put. The natural next steps: a WAL between snapshots, `fsync`, stable iterators, concurrency one extreme at a time.
+The engine declares its limits in `motore.c`'s header: single-threaded, stats via `printf` (teaching project), answers alive until the next put. The natural next steps: the tick inside the PDB1 file (format v2, for replayed TTLs under a moving clock), stable iterators, concurrency one extreme at a time.
 
 ## License
 

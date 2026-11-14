@@ -106,7 +106,9 @@ Per l'AI che ci lavora e per l'umano che la guida. Nasce da dieci capitoli
   tace (fail-open, per contratto) ma `demo_prefetch` in CI diventa rosso.
   Lo staging (`*.prefetch`) è un derivato: gitignored, mai nel repo.
 - **La memoria di lavoro** vive nel motore via MCP (server `motore`,
-  file `memoria.db`, gitignored). Il repo è la verità durevole e la
+  file `memoria.db` + il suo segmento `memoria.db.wal`, gitignored:
+  dal capitolo 13 ogni put è inchiostrata nel WAL e sopravvive al
+  crash anche senza `salva`). Il repo è la verità durevole e la
   memoria NON la duplica: dentro va ciò che non è ancora nel repo —
   lavori in corso, scoperte non scritte, decisioni in bilico. La morte
   è esplicita: quando una cosa entra nel repo (commit), la voce si

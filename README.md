@@ -52,6 +52,7 @@ Cosa ha insegnato, in una frase: una metafora umana più un test che sa fallire 
 | 9 | `database_persist_semantic.c` | la fusione: la risposta semantica viene dal disco, col valore — con l'esperimento *invariants-first* | — | 0 sbagliate su 60000 verifiche dal disco |
 | 11 | `mcp_server.c` + `mcp_stdio.c` | il layer MCP: il motore come strumento per un agente LLM — 10 tool, confidenza sempre dichiarata, `presente` batch | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms del giro LLM |
 | 12 | `prefetch.c` + `prefetch_hook.c` | il prefetcher speculativo: un hook pre_agent legge la traccia dei pensieri dell'agente, predice le chiavi che serviranno e le parcheggia accanto al motore con TTL in richieste; il server MCP consuma lo staging e conta i colpi | **prefetch speculativo** (quello delle CPU, applicato all'IO dell'agente) | hit-rate 1.00 sul filo intero del banco, soglia 0.50 |
+| 13 | `wal.c` + `misura_fsync.c` | il write-ahead log: le intenzioni si inchiostrano una per una (fwrite+fflush+fsync) prima di toccare il motore; il replay ricostruisce tutto fra due snapshot, la coda marcia si tronca | **WAL** (Bitcask, Postgres, SQLite) | 216 µs per put durabile (p50), il replay è esatto: 212/212 |
 
 ## Il motore unico
 
@@ -106,6 +107,21 @@ Il post mortem del capitolo, che è anche la sua lezione: la prima versione pred
 
 I numeri del banco `demo_prefetch` (misurati, gate incluso): `predici` su 8 KB di traccia p50 906 µs / p99 1.16 ms — **una volta per turno**, contro i 10²..10³ ms del giro LLM; `consuma` p50 61 µs a ogni richiesta; `tocca` (il colpo) ~0 µs. Il gate end-to-end attraversa il filo MCP: hit 1, spesa 120 byte, risparmio 500 byte, bilancio +380, hit-rate 1.00 contro soglia 0.50 — EXIT≠0 se un tool mente sulla confidenza o se il bilancio diverge. E il limite dichiarato: le predizioni sono "forse" (similarità sintattica sulla traccia, non semantica), l'hit-rate basso significa che la speculazione inquina più di quanto risparmia — e il dato si dichiara anche quando smentisce l'idea.
 
+## Il write-ahead log: la memoria che sopravvive al crash (capitolo 13)
+
+Metafora: *il diario di bordo.* La nave può affondare a ogni ondata, ma il diario si scrive riga per riga e ogni riga è inchiostrata prima della successiva: chi lo rilegge ricostruisce il viaggio fino all'ultima riga leggibile. Il dolore, numerato nel banco: ogni `salva` riscrive il file intero (64 ms a 50k chiavi) e fra due salva tutto vive solo in arena — un crash perde tutto dall'ultimo snapshot.
+
+La meccanica è un file append-only accanto al db (`<db>.wal`), il contratto [W1]..[W6] scritto prima del codice in `wal.h`:
+
+- **il log viene prima** [W1]: il layer scrive il record PRIMA di toccare il motore — un crash fra i due ri-applica, il contrario perderebbe la put accettata.
+- **il trittico della durabilità** [W2]: `fwrite + fflush + fsync` per record. Il post mortem del capitolo è nella misura stessa: fsync senza fflush sincronizza un kernel che non ha ancora i byte (vivi nel buffer del processo) — la prima misura diceva 70 µs, quella onesta 216 µs. La decisione sulla politica di durabilità è chiusa dai numeri di `misura_fsync`, non dai gusti: fsync per put (216 µs, invisibile al ritmo dell'agente), group commit escluso perché il suo batch non si riempie MAI a quel ritmo — degenerebbe in "fsync solo a salva", cioè in non-WAL.
+- **il prefisso è sicuro** [W3]: CRC-32 per record (il contratto del capitolo 4): un record rotto ferma il replay lì, si perde solo la coda non ancora inchiostrata — e la coda marcia si **tronca**, perché un record nuovo non deve mai finire dietro una coda che il replay non leggerebbe mai.
+- **il tick sta nel record** [W4]: il replay ricostruisce il `nato` di ogni entry — le TTL rivivono col tempo vero, non col tempo del caricamento. Limite dichiarato: caricare lo snapshot a un tick sopra i record allunga le TTL replayate (il tick nel file PDB1 è formato v2, sta in obitorio).
+- **si taglia dopo lo snapshot, mai prima** [W5]: il WAL vive fra due `salva`; un crash fra snapshot e taglio ri-applica l'ultimo batch (idempotente), il contrario lo perderebbe.
+- **uno scrittore** [W6]: single-thread per contratto, come il motore.
+
+I numeri del banco `demo_wal` (misurati, gate incluso): replay esatto di 212/212 record (200 put + 12 del, di cui uno su chiave mai esistita — legale), 239 vive ricostruite con 199 valori verificati uno a uno; la TTL replayata a tick 1 muore a tick 6 come la viva; 50 byte di coda marcia scartati, dichiarati e troncati; il taglio dopo lo snapshot azzera il segmento e il replay successivo applica solo il batch nuovo. Il prezzo: put nuda p50 0.90 µs contro put inchiostrata p50 212 µs — ratio 236x, e a 200 put il WAL costa 42 ms in tutto: la durabilità non è gratis, e il banco lo dice invece di nasconderlo. Dal filo MCP (`demo_mcp`): la put dopo il salva sopravvive al crash senza alcun salva in mezzo — il gate [W1] attraversa il filo intero.
+
 ## Compilare ed eseguire
 
 Serve `gcc` (MinGW su Windows, gcc su Linux) e `make` (su Windows lo porta MSYS2 come `mingw32-make`; a mano: `gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -o motore_demo motore.c demo_motore.c`). Niente dipendenze.
@@ -155,6 +171,9 @@ demo_mcp.c             # il banco del layer: gate e MISURA (latenze, token)
 prefetch.h / prefetch.c      # il prefetcher speculativo: contratto [P1]..[P9]
 prefetch_hook.c        # l'hook pre_agent: traccia -> predizione -> staging
 demo_prefetch.c        # il banco del prefetcher: gate e MISURA (hit-rate, bilancio)
+wal.h / wal.c          # il write-ahead log: contratto [W1]..[W6], il replay esatto
+demo_wal.c             # il banco del WAL: crash simulati, coda marcia, taglio
+misura_fsync.c          # la MISURA che ha chiuso la decisione sulla durabilita'
 .vibe/hooks.toml       # l'hook montato: pre_agent, fail-open
 Makefile               # make motore_demo | make mcp_server | make <capitolo>
 .gitignore             # eseguibili e file di prova non entrano nel repo
@@ -162,7 +181,7 @@ Makefile               # make motore_demo | make mcp_server | make <capitolo>
 
 ## Dove proseguire
 
-Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. I passi naturali dopo: WAL tra snapshot e snapshot, `fsync`, iteratori stabili, concorrenza a un'estremo per volta.
+Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. I passi naturali dopo: il tick dentro il file PDB1 (formato v2, per le TTL replayate a orologio mobile), iteratori stabili, concorrenza a un estremo per volta.
 
 ## Licenza
 
