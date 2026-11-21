@@ -71,7 +71,8 @@ int main(int argc, char **argv)
     size_t scartate = 0;
     mcp_t *s = mcp_apri(argc >= 2 ? argv[1] : NULL, adesso, &scartate);
     if (!s) {
-        fprintf(stderr, "mcp_stdio: memoria, o file non leggibile\n");
+        fprintf(stderr, "mcp_stdio: memoria, file non leggibile, o db"
+                        " gia' posseduto da un altro padrone [I11]\n");
         return 1;
     }
     if (argc >= 2 && scartate > 0)

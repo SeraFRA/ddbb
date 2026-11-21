@@ -54,6 +54,40 @@
  *       di verita' del filo; il main stdio e' un adattatore. Il
  *       banco di prova chiama il nucleo in process: i gate non
  *       parlano con pipe.
+ *  [I11] IL DB HA UN SOLO PADRONE, E LO DICE. (Numerato nella serie
+ *       del motore perche' e' geometria dei processi sul db, ma il
+ *       codice vive qui: il motore non conosce i file altrui, il
+ *       padrone li conosce tutti e tre — db, WAL, staging.) Aprire
+ *       un db e' prendersi il file: due padroni vivi sono corruzione
+ *       SILENTE, due WAL che si scrivono addosso senza che nessun
+ *       CRC se ne accorga (capitolo 13). mcp_apri chiude quindi il
+ *       lucchetto su <db>.lock PRIMA di toccare il db, e lo tiene
+ *       fino a mcp_chiudi: chi arriva secondo riceve NULL e una
+ *       riga che dice chi tiene la porta (il pid sul cartellino).
+ *       il lucchetto NON sta sul db stesso: su Windows un LockFile
+ *       li' negherebbe la lettura all'hook pre_agent, che e' un
+ *       lettore silenzioso per contratto [P3] — un file a parte
+ *       esclude i padroni, MAI i lettori. E dentro il file stesso
+ *       vale la stessa lezione: la zona chiusa e' solo la testa (16
+ *       byte), il cartellino col pid sta dietro (offset 64), cosi'
+ *       il secondo padrone legge chi tiene la porta MENTRE la tiene.
+ *       L'OS rilascia il lucchetto alla morte del processo: il crash
+ *       non lascia serrature eterne. LIMITI DICHIARATI: il
+ *       riconoscimento dentro un PROCESSO e' per STRINGA di percorso
+ *       (la stessa verrucca di tool_salva: la normalizzazione dei
+ *       path sara' una funzione sola, un giorno); il pid del
+ *       cartellino e' diagnostica onesta, non verita' — i pid si
+ *       riciclano, e c'e' una finestra di microsecondi tra
+ *       lucchetto e penna in cui il cartellino nomina il padrone
+ *       che sta per arrivare, non quello che tiene. E il cartellino
+ *       si scrive SEMPRE col medesimo fd del lucchetto: la prima
+ *       versione lo scriveva con una fopen sepolta, e la fclose
+ *       rilasciava il lock appena preso — perche' POSIX ammazza
+ *       TUTTI i lock fcntl del processo su un file quando chiude UN
+ *       suo fd qualunque di quel file. Trappola invisibile su
+ *       Windows (LockFileEx e' per-handle) e mascherata in-process
+ *       dal registro: l'ha catturata solo il banco della CI con due
+ *       processi VERI (il /proc/locks senza il nostro lock).
  *
  * =====================================================================
  * OBITUARIO: COSA NON E' UN TOOL, E PERCHE'
@@ -76,6 +110,17 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifdef _WIN32
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wpedantic"
+# include <windows.h>
+# pragma GCC diagnostic pop
+#else
+# include <fcntl.h>
+# include <unistd.h>
+# include <sys/types.h>
+#endif
 
 #include "motore.h"
 #include "mcp_server.h"
@@ -105,7 +150,207 @@ struct mcp {
      * torna SULLO STESSO file [W5] */
     wal_t    *wal;
     char      percorso_db[512];
+    /* il lucchetto del padrone [I11]: il manico dell'OS dietro
+     * <db>.lock. NULL / -1 = db in memoria (o gia' restituito) */
+#ifdef _WIN32
+    void     *lucchetto;
+#else
+    int       lucchetto;
+#endif
 };
+
+/* ----------------------------------------------- il padrone del db [I11] */
+
+/* il registro dei db che QUESTO processo possiede: fcntl esclude i
+ * processi, non i doppi open interni (POSIX: un processo non si
+ * blocca mai da solo); il registro chiude anche il caso in-process,
+ * che e' poi quello del banco di prova. Il confronto e' per STRINGA
+ * di percorso — la verrucca dichiarata, un giorno una funzione di
+ * normalizzazione sola la curera' (la stessa di tool_salva). */
+#define PADRONI_MAX 16
+static char padroni[PADRONI_MAX][512];
+static int  padroni_vivi[PADRONI_MAX];
+
+static unsigned long pid_nostro(void)
+{
+#ifdef _WIN32
+    return (unsigned long)GetCurrentProcessId();
+#else
+    return (unsigned long)getpid();
+#endif
+}
+
+/* il secondo arriva e la porta e' chiusa: gli si dice chi la tiene.
+ * Il pid sta nel cartellino ALL'OFFSET 64: la zona chiusa dal
+ * lucchetto e' solo la testa del file (i primi 16 byte), cosi' il
+ * secondo padrone PUO' leggere chi tiene la porta anche mentre la
+ * tiene — la lezione dell'hook [P3] vale anche qui. E' diagnostica
+ * onesta, non verita' [I11]: finestra di microsecondi tra lucchetto
+ * e penna, e i pid si riciclano */
+#define CARTELLINO_OFFSET 64
+
+static void custode_annuncia_occupato(const char *percorso_lock,
+                                      const char *percorso_db)
+{
+    char pid[32] = "?";
+    FILE *c = fopen(percorso_lock, "rb");
+    if (c) {
+        if (fseek(c, CARTELLINO_OFFSET, SEEK_SET) == 0 && fgets(pid, sizeof pid, c)) {
+            size_t l = strlen(pid);
+            while (l && (pid[l - 1] == '\n' || pid[l - 1] == '\r'))
+                pid[--l] = '\0';
+            if (l == 0)
+                snprintf(pid, sizeof pid, "?");
+        } else {
+            snprintf(pid, sizeof pid, "?");
+        }
+        fclose(c);
+    }
+    fprintf(stderr, "[I11] \"%s\" e' gia' posseduto (cartellino: pid %s):"
+                    " un db, un solo padrone — chiudi l'altro server o"
+                    " apri un altro file\n", percorso_db, pid);
+}
+
+/* prende il lucchetto: 0 = padrone, -1 = la porta era chiusa (e la
+ * riga l'ha gia' detto ad alta voce). Al SO tocca il resto: chi muore
+ * rilascia da solo, il crash incluso [I11] */
+static int custode_prendi(mcp_t *s, const char *percorso_db)
+{
+    if (!s || !percorso_db)
+        return -1;
+    if (strlen(percorso_db) >= sizeof s->percorso_db) {
+        fprintf(stderr, "[I11] percorso del db oltre %zu byte\n",
+                sizeof s->percorso_db);
+        return -1;
+    }
+    int buco = -1;
+    for (int i = 0; i < PADRONI_MAX; i++) {
+        if (padroni_vivi[i]) {
+            if (strcmp(padroni[i], percorso_db) == 0) {
+                fprintf(stderr, "[I11] \"%s\" e' gia' posseduto da QUESTO"
+                                " processo: un db, un solo padrone\n",
+                        percorso_db);
+                return -1;
+            }
+        } else if (buco < 0) {
+            buco = i;
+        }
+    }
+    if (buco < 0) {
+        fprintf(stderr, "[I11] questo processo possiede gia' %d db:"
+                        " il tetto del registro\n", PADRONI_MAX);
+        return -1;
+    }
+    char percorso_lock[512 + 8];
+    if ((size_t)snprintf(percorso_lock, sizeof percorso_lock,
+                         "%s.lock", percorso_db) >= sizeof percorso_lock) {
+        fprintf(stderr, "[I11] percorso del lucchetto troppo lungo\n");
+        return -1;
+    }
+#ifdef _WIN32
+    HANDLE h = CreateFileA(percorso_lock, GENERIC_READ | GENERIC_WRITE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "[I11] il lucchetto \"%s\" non si crea/apro:"
+                        " niente proprieta', niente server\n",
+                percorso_lock);
+        return -1;
+    }
+    /* si chiude SOLO la testa del file (16 byte): il cartellino a
+     * offset 64 resta leggibile al secondo che arrivera' */
+    OVERLAPPED ov;
+    memset(&ov, 0, sizeof ov);
+    if (!LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                    0, 16, 0, &ov)) {
+        CloseHandle(h);
+        custode_annuncia_occupato(percorso_lock, percorso_db);
+        return -1;
+    }
+    /* il cartellino, col MEDESIMO manico del lucchetto: qui un
+     * secondo handle aperto/chiuso non libererebbe nulla (LockFileEx
+     * e' per-handle), ma il cammino unico evita di trascinare
+     * l'analoga trappola POSIX di sotto */
+    {
+        char pid_buf[32];
+        int n = snprintf(pid_buf, sizeof pid_buf, "%lu\n", pid_nostro());
+        LARGE_INTEGER pos;
+        DWORD scritti = 0;
+        pos.QuadPart = CARTELLINO_OFFSET;
+        if (SetFilePointerEx(h, pos, NULL, FILE_BEGIN))
+            WriteFile(h, pid_buf, (DWORD)n, &scritti, NULL);
+    }
+    s->lucchetto = (void *)h;
+#else
+    int fd = open(percorso_lock, O_RDWR | O_CREAT, 0644);
+    if (fd < 0) {
+        fprintf(stderr, "[I11] il lucchetto \"%s\" non si crea/apro:"
+                        " niente proprieta', niente server\n",
+                percorso_lock);
+        return -1;
+    }
+    /* fcntl, non flock: e' POSIX del 1990, dichiarato con
+     * -std=c11 + _POSIX_C_SOURCE, e i conflitti sono per processo —
+     * il registro qui sopra copre il caso dentro questo processo.
+     * TRAPPOLA (catturata dal banco due-processi in CI): i lock
+     * fcntl muoiono quando il processo chiude UN fd qualunque dello
+     * stesso file — quindi dopo di qui il cartellino va scritto
+     * col MEDESIMO fd, mai con una fopen/fclose che chiuderebbe
+     * la porta appena chiusa */
+    struct flock lk;
+    memset(&lk, 0, sizeof lk);
+    lk.l_type = F_WRLCK;
+    lk.l_whence = SEEK_SET;
+    lk.l_start = 0;
+    lk.l_len = 16;                      /* la testa: il resto si legge */
+    if (fcntl(fd, F_SETLK, &lk) == -1) {
+        close(fd);
+        custode_annuncia_occupato(percorso_lock, percorso_db);
+        return -1;
+    }
+    {
+        char pid_buf[32];
+        int n = snprintf(pid_buf, sizeof pid_buf, "%lu\n", pid_nostro());
+        if (lseek(fd, CARTELLINO_OFFSET, SEEK_SET) != (off_t)-1 &&
+                write(fd, pid_buf, (size_t)n) < 0) {
+            /* muto di proposito: il cartellino e' diagnostica, il
+             * lucchetto e' il contratto */
+        }
+    }
+    s->lucchetto = fd;
+#endif
+    snprintf(padroni[buco], sizeof padroni[buco], "%s", percorso_db);
+    padroni_vivi[buco] = 1;
+    return 0;
+}
+
+/* restituisce il lucchetto: OS e registro nello stesso gesto, perche'
+ * la proprieta' muore atomica o non muore [I11] */
+static void custode_lascia(mcp_t *s)
+{
+    if (!s)
+        return;
+#ifdef _WIN32
+    if (s->lucchetto) {
+        CloseHandle((HANDLE)s->lucchetto);
+        s->lucchetto = NULL;
+    }
+#else
+    if (s->lucchetto >= 0) {
+        close(s->lucchetto);
+        s->lucchetto = -1;
+    }
+#endif
+    if (s->percorso_db[0]) {
+        for (int i = 0; i < PADRONI_MAX; i++) {
+            if (padroni_vivi[i] &&
+                    strcmp(padroni[i], s->percorso_db) == 0) {
+                padroni_vivi[i] = 0;
+                break;
+            }
+        }
+    }
+}
 
 /* ------------------------------------------------------------- utilita' */
 
@@ -116,18 +361,23 @@ mcp_t *mcp_apri(const char *percorso_db, uint32_t adesso, size_t *scartate)
     mcp_t *s = calloc(1, sizeof *s);
     if (!s)
         return NULL;
+#ifndef _WIN32
+    s->lucchetto = -1;    /* calloc porta 0: un fd valido no [I11] */
+#endif
     if (percorso_db) {
+        /* il lucchetto viene PRIMA di toccare il file [I11]: e' la
+         * prima cosa che chi vuole diventare padrone deve vincere */
+        if (custode_prendi(s, percorso_db) != 0) {
+            free(s);
+            return NULL;
+        }
+        snprintf(s->percorso_db, sizeof s->percorso_db, "%s", percorso_db);
         s->mo = motore_apri_da(percorso_db, adesso, scartate);
         if (!s->mo) {
+            custode_lascia(s);
             free(s);
             return NULL;
         }
-        if (strlen(percorso_db) >= sizeof s->percorso_db) {
-            motore_chiudi(s->mo);
-            free(s);
-            return NULL;
-        }
-        strcpy(s->percorso_db, percorso_db);
         /* il WAL vive accanto al db (capitolo 13): prima si riavvolge
          * il log, poi si serve. Fail-closed: se il segmento non si puo'
          * aprire non si promette durabilita' che non si ha */
@@ -135,6 +385,7 @@ mcp_t *mcp_apri(const char *percorso_db, uint32_t adesso, size_t *scartate)
         snprintf(percorso_wal, sizeof percorso_wal, "%s.wal", percorso_db);
         s->wal = wal_apri(percorso_wal);
         if (!s->wal) {
+            custode_lascia(s);
             motore_chiudi(s->mo);
             free(s);
             return NULL;
@@ -171,6 +422,7 @@ void mcp_chiudi(mcp_t *s)
 {
     if (!s)
         return;
+    custode_lascia(s);          /* il padrone restituisce prima di andarsene [I11] */
     wal_chiudi(s->wal);
     prefetch_parcheggio_chiudi(s->pf);
     motore_chiudi(s->mo);

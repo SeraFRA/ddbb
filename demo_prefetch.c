@@ -680,6 +680,7 @@ int main(void)
     remove(staging);
     remove("banco12.db");
     remove("banco12.db.prefetch");
+    remove("banco12.db.lock");
     remove("fake_session/journal/0000000000000001.jsonl");
     rimuovi_dir("fake_session/journal");
     rimuovi_dir("fake_session");

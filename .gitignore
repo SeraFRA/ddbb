@@ -28,3 +28,5 @@ demo_prefetch
 
 # il segmento del WAL (capitolo 13): derivato del db, mai nel repo
 *.wal
+# il lucchetto del padrone [I11]: derivato del db, mai nel repo
+*.lock

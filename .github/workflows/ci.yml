@@ -70,6 +70,21 @@ jobs:
           printf '{"jsonrpc":"2.0","id":1,"method":"ping"}\n' | ./mcp_server > risp.txt
           grep -q '"result":{}' risp.txt
 
+      - name: '[I11] due server veri sullo stesso db: il secondo esce ad alta voce'
+        run: |
+          printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"put","arguments":{"chiave":"padrone","valore":"uno solo"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"salva","arguments":{"nome":"lock_ci.db"}}}\n' | ./mcp_server > /dev/null
+          mkfifo fifolungo
+          ./mcp_server lock_ci.db < fifolungo > /dev/null 2>&1 &
+          exec 9> fifolungo
+          sleep 1
+          if printf 'ping\n' | ./mcp_server lock_ci.db > secondo.log 2>&1; then
+            echo "GATE [I11] ROTTO: il secondo padrone e' partito"
+            exit 1
+          fi
+          grep -q "I11" secondo.log || { echo "il secondo non dichiara la porta occupata"; exit 1; }
+          exec 9>&-
+          rm -f fifolungo secondo.log lock_ci.db lock_ci.db.wal lock_ci.db.lock
+
       - name: ogni capitolo e' il proprio banco di prova
         run: |
           stato=0

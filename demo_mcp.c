@@ -23,6 +23,10 @@
  *              coerente == true
  *   GATE [M8]  le description dichiarano i limiti (SINTATTICA,
  *              "certamente", il forse del bloom)
+ *   GATE [I11] il secondo opener dello stesso db cade ad alta voce;
+ *              la sua caduta non acceca il primo; chiuso il primo,
+ *              il secondo ci riesce (il caso due-processi lo prova
+ *              la CI, con due server veri)
  *   GATE [MISURA] p99 di ogni tool sotto il tetto di complessita';
  *              risposta media sotto il tetto di byte (i token si
  *              pagano in contesto)
@@ -871,10 +875,49 @@ int main(void)
                " — nessun salva in mezzo\n");
         json_libera(p);
     }
+    /* ---- [I11] il db ha un solo padrone, e lo dice */
+    printf("[I11] il padrone: un secondo opener sullo stesso db"
+           " deve cadere ad alta voce...\n");
+    {
+        /* stesso processo, stesso db: lo dichiara il registro. Il
+         * caso vero — due PROCESSI che si contendono il lucchetto —
+         * lo prova la CI con due server vivi [I11] */
+        mcp_t *s2 = mcp_apri("banco_mcp.db", 0, NULL);
+        if (s2) {
+            fprintf(stderr, "GATE [I11] ROTTO: il secondo padrone e'"
+                            " partito lo stesso\n");
+            mcp_chiudi(s2);
+            return 1;
+        }
+        /* e la caduta del secondo non tocca il primo: chi risponde
+         * dopo una porta sbattuta in faccia a un altro e' il padrone */
+        jval_t *p = tool(s, "get", "{\"chiave\":\"dopo-salva\"}");
+        const char *v = json_str(json_get(p, "valore"), &vl);
+        if (!v || strcmp(v, "sopravvive") != 0) {
+            fprintf(stderr, "GATE [I11] ROTTO: la caduta del secondo"
+                            " ha accecato il primo\n");
+            return 1;
+        }
+        json_libera(p);
+        printf("     il secondo e' caduto, il primo serve ancora:"
+               " il lucchetto gli e' rimasto addosso\n");
+    }
+    mcp_chiudi(s);                       /* il padrone se ne va */
+    {
+        mcp_t *s2 = mcp_apri("banco_mcp.db", 0, NULL);
+        if (!s2) {
+            fprintf(stderr, "GATE [I11] ROTTO: partito il primo, il"
+                            " lucchetto non e' stato restituito\n");
+            return 1;
+        }
+        mcp_chiudi(s2);
+        printf("     partito il primo, il secondo ci riesce: il"
+               " lucchetto segue la vita del padrone\n");
+    }
     remove("banco_mcp.db");
     remove("banco_mcp.db.wal");
+    remove("banco_mcp.db.lock");
 
-    mcp_chiudi(s);
     printf("\nTUTTI I GATE VERDI: il motore e' uno strumento onesto.\n");
     return 0;
 }

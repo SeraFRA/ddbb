@@ -108,7 +108,13 @@ Per l'AI che ci lavora e per l'umano che la guida. Nasce da dieci capitoli
 - **La memoria di lavoro** vive nel motore via MCP (server `motore`,
   file `memoria.db` + il suo segmento `memoria.db.wal`, gitignored:
   dal capitolo 13 ogni put è inchiostrata nel WAL e sopravvive al
-  crash anche senza `salva`). Il repo è la verità durevole e la
+  crash anche senza `salva`). Un db ha **un solo padrone [I11]**:
+  chi apre un file già posseduto esce ad alta voce (due padroni vivi
+  = due WAL che si scrivono addosso, corruzione silenziosa); il
+  lucchetto è `<db>.lock`, gitignored, e tocca solo i padroni —
+  l'hook pre_agent legge sempre. Finché non esiste il gateway a
+  server unico, la seconda chat viva sullo stesso db è un errore
+  dichiarato, non un bug taciuto. Il repo è la verità durevole e la
   memoria NON la duplica: dentro va ciò che non è ancora nel repo —
   lavori in corso, scoperte non scritte, decisioni in bilico. La morte
   è esplicita: quando una cosa entra nel repo (commit), la voce si
