@@ -111,6 +111,19 @@ I numeri del banco `demo_prefetch` (misurati, gate incluso): `predici` su 8 KB d
 
 Il verdetto della sessione vera è arrivato, ed è onesto in entrambe le direzioni. Su un progetto reale durato due giornate (trascrizione vocale, un agente solo, debug su codice già in contesto) il protocollo di misura ha raccolto: hit-rate 0.10-0.11 contro soglia 0.50, bilancio **−4231 byte** — quando il lavoro è tutto su contesto noto, la speculazione inquina più di quanto risparmia, e il numero lo dice. Nelle sessioni che riprendono temi a distanza di giorni (la memoria contiene cose FUORI dal contesto: consegne, post mortem, ricerche) lo stesso strumento sta a hit-rate 1.00 e bilancio +1874. La lezione di campo: **il prefetcher paga sulla distanza tra memoria e contesto** — e la soglia numerata esiste proprio per poterlo dichiarare. Nel rosso, due meriti: le 7 predizioni sbagliate sono morte da sole nel TTL (l'oblio incorporato ha smaltito l'inquinamento), e il dato deludente è la partenza dichiarata per il futuro: una soglia che non sa adattarsi all'hit-rate e un dedup che guarda le chiavi ma non i valori già in contesto.
 
+### Il banco vivente: agenti LLM veri sulla lavagna ([P10])
+
+Dal capitolo 14 in poi l'hook sa essere **cliente della lavagna**: le chiavi non si leggono più dallo snapshot ma si chiedono al custode via filo ([P10] in `prefetch.h`) — e quello che vede è l'arena viva. Tre corse con agenti GLM veri (cold start, un solo turno, same task per regime), ciascuna col suo verdetto onesto:
+
+| lavagna | richieste | byte letti dal filo | colpi del parcheggio | esito |
+|---|---|---|---|---|
+| 3 chiavi, valori corti | 4 (3 get + audit) | — | **3/3, hit-rate 1.00** | l'agente ha tirato le proposte e basta: bilancio **+81 byte** |
+| 40 chiavi, 4 namespace | 4 | 6926 | 2/4 offerte usate | pareggio (−35): una lavagna che sta in un morso si compra intera con un `intervallo` |
+| 200 chiavi, valori da paragrafo | 25 | 88043 | 1 messo, ed era rumore | l'agente ha usato-verificato-scartato la proposta, poi pagato lo scan; OFF (chiavi opache): 13 richieste, 85436 byte, tutto 0 nel parcheggio |
+
+Le risposte sono state 8/8 esatte in ogni corsa, trabocchetto (i cinghiali dell'orto) sempre col silenzio, le confidenza sempre riportate — l'onesta' come API tenuta da modelli piccoli veri. Il verdetto misurato: **il guadagno del prefetcher non scala col numero di chiavi — scala con la distanza tra memoria e contesto e col nome delle chiavi**. Con 3 chiavi parlanti l'apertura e' regalata; a 40 lo scan intero costa quanto due proposte; a 200 chiavi generate con nomi di template (le frags ripetute dell'artigiano di turno) la similarita' sintattica ha proposto solo rumore e la finestra del 64 (le voci in ordine di nascita) ha mancato la meta'. Due dati duri per il futuro dichiarato nel contratto: le chiavi descrittive pagano solo se sono anche SINGOLARI (il rumore di nomi ripetuti cattura la similarita'), e il filo che pagina a 64 voci rende il cliente della lavagna cieco a tutto cio' che nasce dopo la prima pagina.
+
+
 ## Il write-ahead log: la memoria che sopravvive al crash (capitolo 13)
 
 Metafora: *il diario di bordo.* La nave può affondare a ogni ondata, ma il diario si scrive riga per riga e ogni riga è inchiostrata prima della successiva: chi lo rilegge ricostruisce il viaggio fino all'ultima riga leggibile. Il dolore, numerato nel banco: ogni `salva` riscrive il file intero (64 ms a 50k chiavi) e fra due salva tutto vive solo in arena — un crash perde tutto dall'ultimo snapshot.

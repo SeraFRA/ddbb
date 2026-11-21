@@ -111,6 +111,18 @@ Numbers from the `demo_prefetch` bench (measured, gate included): `predici` over
 
 The real session's verdict arrived, and it is honest in both directions. On a real two-day project (voice transcription, a single agent, debugging code already in context) the measurement protocol collected: hit-rate 0.10-0.11 against the 0.50 threshold, balance **−4231 bytes** — when the work is all on known context, speculation pollutes more than it saves, and the number says so. In sessions that resume topics days apart (the memory holds things OUTSIDE the context: handoffs, post mortems, research) the same tool sits at hit-rate 1.00 and balance +1874. The field lesson: **the prefetcher pays on the distance between memory and context** — and the numbered threshold exists precisely so this can be declared. In the red, two merits: the 7 wrong predictions died on their own in the TTL (built-in forgetting disposed of the pollution), and the disappointing data is the declared starting point for the future: a threshold that cannot adapt to the hit-rate, and a dedup that watches the keys but not the values already in context.
 
+### The living bench: real LLM agents on the blackboard ([P10])
+
+Since chapter 14 the hook knows how to be a **client of the blackboard**: keys are no longer read from the snapshot but asked from the custode over the wire ([P10] in `prefetch.h`) — and what it sees is the live arena. Three runs with real GLM agents (cold start, one turn each, same task per regime), each with its honest verdict:
+
+| blackboard | requests | bytes read from the wire | parking hits | outcome |
+|---|---|---|---|---|
+| 3 keys, short values | 4 (3 get + audit) | — | **3/3, hit-rate 1.00** | the agent pulled the offers and nothing else: balance **+81 bytes** |
+| 40 keys, 4 namespaces | 4 | 6926 | 2 of 4 offers used | a tie (−35): a blackboard that fits in one bite is bought whole with a single `intervallo` |
+| 200 keys, paragraph values | 25 | 88043 | 1 pulled, and it was noise | the agent used-checked-discarded the offer, then paid the scan; OFF (opaque keys): 13 requests, 85436 bytes, all zeros in the parking |
+
+Answers were 8/8 exact in every run, the trap (the boars of the vegetable garden) always answered with silence, confidences always reported — honesty as an API, held by real small models. The measured verdict: **the prefetcher's gain does not scale with the number of keys — it scales with the distance between memory and context, and with the names of the keys**. With 3 talking keys the opening is a gift; at 40 the full scan costs what two offers would; at 200 template-named keys (the craftsman's repeated frags) the syntactic similarity proposed pure noise, and the 64-slot window (keys in birth order) missed the mark. Two hard facts for the declared future: descriptive keys pay only if they are also SINGULAR (repeated-name noise captures the similarity), and a wire that pages 64 items leaves the blackboard's client blind to everything born after the first page.
+
 ## The write-ahead log: memory that survives the crash (chapter 13)
 
 Metaphor: *the ship's logbook.* The ship may sink at any wave, but the logbook is written line by line and each line is inked before the next: whoever reads it rebuilds the voyage up to the last readable line. The pain, numbered in the bench: every `salva` rewrites the whole file (64 ms at 50k keys) and between two saves everything lives only in the arena — a crash loses everything since the last snapshot.
