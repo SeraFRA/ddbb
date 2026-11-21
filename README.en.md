@@ -53,6 +53,8 @@ What it taught, in one sentence: a human metaphor plus a test that knows how to 
 | 11 | `mcp_server.c` + `mcp_stdio.c` | the MCP layer: the engine as a tool for an LLM agent — 10 tools, confidence always declared, batch `presente` | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms of the LLM round-trip |
 | 12 | `prefetch.c` + `prefetch_hook.c` | the speculative prefetcher: a pre_agent hook reads the agent's reasoning trace, predicts the keys it will need and stages them next to the engine with a TTL in requests; the MCP server consumes the staging and counts the hits | **speculative prefetch** (the CPU one, applied to the agent's IO) | hit-rate 1.00 on the bench's full wire, threshold 0.50 |
 | 13 | `wal.c` + `misura_fsync.c` | the write-ahead log: intents are inked one by one (fwrite+fflush+fsync) before touching the engine; the replay rebuilds everything between two snapshots, the rotten tail is truncated | **WAL** (Bitcask, Postgres, SQLite) | 216 µs per durable put (p50), the replay is exact: 212/212 |
+| 14 | `demo_multiagente.c` | the bench that decided the gateway: the cold-start hump measured BEFORE building — short and long sessions, same task, prefetch ON/OFF, costs from the real wire | benchmark-first ("measure first, build after") | the hump: margin 70.9% (short sessions) vs 38.4% (long) |
+| 14 | `gateway.c` + `mcp_gateway.c` | the single-custode blackboard: ONE process owns the engine [I11], N clients speak the unchanged MCP wire [L3] through a TCP port on 127.0.0.1 — A writes, B reads with no save | **blackboard** (Hearsay-II, Linda 1985) — Redis's single-server model | get in-process 4.27 µs, across the door p50 12.46 µs |
 
 ## The single engine
 
@@ -124,6 +126,30 @@ The mechanics are one append-only file next to the db (`<db>.wal`), with contrac
 
 Numbers from the `demo_wal` bench (measured, gate included): exact replay of 212/212 records (200 puts + 12 deletes, one of them on a never-existing key — legal), 239 live entries rebuilt with 199 values verified one by one; the replayed TTL born at tick 1 dies at tick 6 like the live one; 50 bytes of rotten tail discarded, declared and truncated; the cut after the snapshot zeroes the segment and the next replay applies only the new batch. The price: naked put p50 0.90 µs vs inked put p50 212 µs — a 236x ratio, and at 200 puts the WAL costs 42 ms in total: durability is not free, and the bench says so instead of hiding it. From the MCP wire (`demo_mcp`): the put after the save survives the crash with no save in between — gate [W1] crosses the full wire.
 
+## The single-custode blackboard (chapter 14)
+
+Metaphor: *the building with one archivist.* N agents walk in through the door, each with its own counter; behind the desk there is ONE live arena, ONE WAL, ONE lock. What agent A writes, agent B reads before anyone saves: the blackboard is the live arena — the opposite of the snapshot, which is the photograph of the dead.
+
+The road was marked by chapter 13 and by field data. Two processes on the same db were not "unsupported": they were **silent corruption** — two WALs writing over each other, no lock, nobody noticing. The arc moved one extreme at a time, each with its own contract and its own commit:
+
+1. **[I11] one db, one padrone**: a lock (flock on Linux, LockFile on Windows) on `<db>.lock` — whoever arrives second falls loudly, with the pid tag of whoever holds the door, instead of two writers on the same file. The silent bug becomes a contract.
+2. **[I12] the snapshot is all-or-nothing**: `fopen("wb")` burned half a file at a time — a crash mid-`salva` left a truncated db that the CRC rebuild declared dead at the first torn entry. Now it writes to `<nome>.tmp` and renames: rename is atomic, the window is closed.
+3. **The bench before the gateway** (`demo_multiagente`, [B1]..[B6]): the question that decides a month of work — does the prefetcher's gain have a hump? — measured before building the socket. The answer: **yes** — ON-vs-OFF margin 70.9% in short, lookup-dense sessions (the sub-agent profile), 38.4% in long ones where writing turns pay handles without hitting (parking budget: −29, −19). The field verdict reproduced deterministically: the prefetcher is a cold-start optimizer. The blackboard pays, and pays most where a gateway would serve it.
+4. **The gateway** (`gateway.h`/`gateway.c` + `mcp_gateway.c`, [L1]..[L6]): Redis's architecture applied to working memory — one process owns the engine, N clients speak over a TCP socket on 127.0.0.1 with the **chapter-11 wire unchanged** (`mcp_gestisci` does not change by one line: an existing MCP client just connects and works). The `mcp_stdio.c` shell remains shell-1 (one client, stdin/stdout); `mcp_gateway` is shell-2.
+
+The blackboard contract, written before the code:
+
+- **[L1] the blackboard is the live arena**: state written by one client is visible to the next client's get, with no save in between. Declared consequences: the WAL is the padrone's (EVERY client's puts are inked in the single segment [W1]); one client's save cuts the segment for everyone [W5] — the memory convention stays one: "save after heavy writes", whoever wrote them.
+- **[L2] one custode [I11]**: the gateway IS the padrone. N clients are not N padroni: clients never touch the file.
+- **[L3] the wire is chapter 11's**: JSON-RPC 2.0, one object per line, same methods.
+- **[L4] nobody speaks in someone else's time**: event-loop select; a torn line stays in ITS buffer, an unread reply in ITS output queue — the slow client consumes its own queue, not other people's time.
+- **[L5] the clock is the custode's lap [I8]**: everyone's requests feed the same counter — one client's TTL is shortened by other people's traffic: the blackboard is a commons even in consumption.
+- **[L6] the door is narrow**: bind on 127.0.0.1, no authentication — which is exactly why the door does not face the world.
+
+Numbers from the `demo_gateway` bench (gate included, real processes and sockets): A writes and B reads from another socket with no save [L1]; envelope and confidence cross intact [L3]; torn and interleaved lines served in order, B's queue in the right order [L4]; the custode crashing without a save loses NO client's writes — the WAL replay returns both [W1]; the second gateway falls loudly with its pid tag [L2]/[I11]. Door MEASUREMENT: in-process get 4.27 µs vs p50 12.46 µs across the socket (p99 108.88 µs — on MinGW ~96/371 µs): the kernel sits in the middle, and the event loop serves it without disdain.
+
+The chapter's post mortem is 40 years old: **Nagle + delayed-ACK** (1984, plus Linux's delayed-ACK): the 1-byte send of the `'\n'` sat in the kernel's stomach for up to 40 ms — the bench would have hung in CI, and on Windows a benign timing hid the hole. Cure: `TCP_NODELAY` on accepted and client sockets (Redis's same pill), and deadline-bounded waits in the bench. Obituary: zero threads (one huge reply delays the others — the same renunciation as [W6]), zero keepalive in v1, no authentication (hence [L6]).
+
 ## Build and run
 
 You need `gcc` (MinGW on Windows, gcc on Linux) and `make` (on Windows MSYS2 provides it as `mingw32-make`; by hand: `gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -o motore_demo motore.c demo_motore.c`). No dependencies.
@@ -134,6 +160,9 @@ make mcp_server         # the MCP server over stdio: ./mcp_server [file.db [tick
 make demo_mcp           # the MCP layer bench: gates [M1]..[M9] + MEASUREMENT
 make prefetch_hook      # the pre_agent hook: ./prefetch_hook [file.db]
 make demo_prefetch      # the prefetcher bench: gates [P1]..[P7] + MEASUREMENT
+make demo_multiagente   # the multi-session bench: the cold-start hump
+make mcp_gateway        # shell-2: ./mcp_gateway [file.db [tick]] — the blackboard listening
+make demo_gateway       # the blackboard bench: gates [L1]..[L6] + door MEASUREMENT
 make database_quotient  # any chapter, one at a time
 ./motore_demo           # exits with EXIT!=0 if a contract breaks
 ```
@@ -176,6 +205,10 @@ demo_prefetch.c        # the prefetcher bench: gates and MEASUREMENT (hit-rate, 
 wal.h / wal.c          # the write-ahead log: contract [W1]..[W6], the exact replay
 demo_wal.c             # the WAL bench: simulated crashes, rotten tail, the cut
 misura_fsync.c          # the MEASUREMENT that closed the durability decision
+demo_multiagente.c      # the multi-session bench: the cold-start hump, [B1]..[B6]
+gateway.h / gateway.c  # the gateway: the single-custode blackboard, [L1]..[L6]
+mcp_gateway.c           # shell-2: the TCP door on 127.0.0.1
+demo_gateway.c          # the blackboard bench: real processes, real sockets, door MEASUREMENT
 .vibe/hooks.toml       # the hook mounted: pre_agent, fail-open
 Makefile               # make motore_demo | make mcp_server | make <chapter>
 .gitignore             # binaries and test files stay out of the repo
@@ -183,7 +216,7 @@ Makefile               # make motore_demo | make mcp_server | make <chapter>
 
 ## Where to go next
 
-The engine declares its limits in `motore.c`'s header: single-threaded, stats via `printf` (teaching project), answers alive until the next put. The natural next steps: the tick inside the PDB1 file (format v2, for replayed TTLs under a moving clock), stable iterators, concurrency one extreme at a time.
+The engine declares its limits in `motore.c`'s header: single-threaded, stats via `printf` (teaching project), answers alive until the next put. "Concurrency one extreme at a time" arrived with chapter 14 (lock, atomic snapshot, gateway) — but declared in its limits, not promised: zero threads, zero keepalive, no authentication. The natural next steps: the **living bench** — real (small, low-effort) LLM agents writing on each other through the blackboard, and the prefetcher's speculative hand-off between one agent's trace and another's get; then the tick inside the PDB1 file (format v2, for replayed TTLs under a moving clock) and stable iterators.
 
 ## License
 

@@ -53,6 +53,8 @@ Cosa ha insegnato, in una frase: una metafora umana più un test che sa fallire 
 | 11 | `mcp_server.c` + `mcp_stdio.c` | il layer MCP: il motore come strumento per un agente LLM — 10 tool, confidenza sempre dichiarata, `presente` batch | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms del giro LLM |
 | 12 | `prefetch.c` + `prefetch_hook.c` | il prefetcher speculativo: un hook pre_agent legge la traccia dei pensieri dell'agente, predice le chiavi che serviranno e le parcheggia accanto al motore con TTL in richieste; il server MCP consuma lo staging e conta i colpi | **prefetch speculativo** (quello delle CPU, applicato all'IO dell'agente) | hit-rate 1.00 sul filo intero del banco, soglia 0.50 |
 | 13 | `wal.c` + `misura_fsync.c` | il write-ahead log: le intenzioni si inchiostrano una per una (fwrite+fflush+fsync) prima di toccare il motore; il replay ricostruisce tutto fra due snapshot, la coda marcia si tronca | **WAL** (Bitcask, Postgres, SQLite) | 216 µs per put durabile (p50), il replay è esatto: 212/212 |
+| 14 | `demo_multiagente.c` | il banco che ha deciso il gateway: la gobba del cold start misurata PRIMA di costruire — sessioni brevi e lunghe, stesso compito, prefetch ON/OFF, costi del filo vero | benchmark-first ("misurato prima, deciso dopo") | la gobba: margine 70.9% (sessioni brevi) contro 38.4% (lunghe) |
+| 14 | `gateway.c` + `mcp_gateway.c` | la lavagna a un solo custode: UN processo possiede il motore [I11], N clienti parlano al filo MCP invariato [L3] attraverso una porta TCP su 127.0.0.1 — A scrive, B legge senza salva | **blackboard** (Hearsay-II, Linda 1985) — il modello a server unico di Redis | get in-process 4.27 µs, attraverso la porta p50 12.46 µs |
 
 ## Il motore unico
 
@@ -124,6 +126,30 @@ La meccanica è un file append-only accanto al db (`<db>.wal`), il contratto [W1
 
 I numeri del banco `demo_wal` (misurati, gate incluso): replay esatto di 212/212 record (200 put + 12 del, di cui uno su chiave mai esistita — legale), 239 vive ricostruite con 199 valori verificati uno a uno; la TTL replayata a tick 1 muore a tick 6 come la viva; 50 byte di coda marcia scartati, dichiarati e troncati; il taglio dopo lo snapshot azzera il segmento e il replay successivo applica solo il batch nuovo. Il prezzo: put nuda p50 0.90 µs contro put inchiostrata p50 212 µs — ratio 236x, e a 200 put il WAL costa 42 ms in tutto: la durabilità non è gratis, e il banco lo dice invece di nasconderlo. Dal filo MCP (`demo_mcp`): la put dopo il salva sopravvive al crash senza alcun salva in mezzo — il gate [W1] attraversa il filo intero.
 
+## La lavagna a un solo custode: la blackboard (capitolo 14)
+
+Metafora: *il palazzo con un solo archivista.* N agenti entrano dalla porta, ognuno col suo sportello; dietro il bancone c'è UNA arena viva, UN solo WAL, UN solo lucchetto. Ciò che l'agente A scrive, l'agente B lo legge senza che nessuno abbia salvato: la lavagna è l'arena viva, il contrario dello snapshot che è la fotografia dei morti.
+
+La strada era segnata dal capitolo 13 e dal campo. Due processi sullo stesso db non erano "non supportati": erano **corruzione silenziosa** — due WAL che si scrivono addosso, nessun lock, nessuno se ne accorge. L'arco è andato a un estremo per volta, ciascuno col suo contratto e il suo commit:
+
+1. **[I11] un db, un solo padrone**: un lucchetto (flock su Linux, LockFile su Windows) sul `<db>.lock` — chi arriva secondo cade ad alta voce col cartellino del pid di chi tiene la porta, invece di scrivere in due sullo stesso file. Il bug silenzioso diventa contratto.
+2. **[I12] lo snapshot è tutto o nulla**: il `fopen("wb")` bruciava mezzo file alla volta — un crash a metà `salva` lasciava un db troncato che la ricostruzione del CRC dichiarava morto alla prima entry spezzata. Ora si scrive su `<nome>.tmp` e si rinomina: il rename è atomico, la finestra è chiusa.
+3. **Il banco prima del gateway** (`demo_multiagente`, [B1]..[B6]): la domanda che decide un mese di lavoro — il guadagno del prefetcher ha una gobba? — misurata prima di costruire il socket. La risposta: **sì**: margine ON-vs-OFF 70.9% nelle sessioni brevi e dense di look-up (il profilo del sub-agente), 38.4% nelle lunghe dove i turni di scrittura pagano handle senza colpire (bilancio del parcheggio: −29, −19). Il verdetto di campo riprodotto deterministicamente: il prefetcher è un ottimizzatore del cold start. La lavagna paga, e paga di più dove il gateway la serve.
+4. **Il gateway** (`gateway.h`/`gateway.c` + `mcp_gateway.c`, [L1]..[L6]): l'architettura di Redis applicata alla memoria di lavoro — un solo processo possiede il motore, N clienti parlano su socket TCP 127.0.0.1 (porta scelta dall'OS) con il **filo del capitolo 11 invariato** (`mcp_gestisci` non cambia di una riga: un cliente MCP esistente si connette e funziona). Il guscio `mcp_stdio.c` resta il guscio-1 (un cliente, stdin/stdout); `mcp_gateway` è il guscio-2.
+
+Il contratto della lavagna, scritto prima del codice:
+
+- **[L1] la lavagna è l'arena viva**: lo stato che un cliente scrive è visibile al prossimo get di un altro cliente, senza salva in mezzo. Conseguenze dichiarate: il WAL è quello del padrone (le put di TUTTI si inchiostrano nel segmento unico [W1]); il salva di uno taglia il segmento per tutti [W5] — la convenzione della memoria resta una: "salva dopo le scritture pesanti", di chiunque siano.
+- **[L2] un solo custode [I11]**: il gateway È il padrone. N clienti non sono N padroni: i clienti non toccano il file.
+- **[L3] il filo è quello del capitolo 11**: JSON-RPC 2.0, un oggetto per riga, stessi metodi.
+- **[L4] nessuno parla nel tempo degli altri**: select a eventi; la riga spezzata resta nel SUO buffer, la risposta non letta nella SUA coda di uscita — il cliente lento consuma la sua coda, non il tempo altrui.
+- **[L5] l'orologio è il giro del custode [I8]**: le richieste di tutti alimentano lo stesso contatore — il TTL di un cliente è accorciato dal traffico degli altri: la lavagna è un bene comune anche nel consumo.
+- **[L6] la porta è stretta**: bind su 127.0.0.1, senza autenticazione — per questo la porta non dà sul mondo.
+
+I numeri del banco `demo_gateway` (gate incluso, processi e socket veri): A scrive e B legge da un altro socket senza salva [L1]; envelope e confidenza attraversano intatti [L3]; righe spezzate e mescolate servite in ordine, la coda di B nell'ordine giusto [L4]; il crash del custode senza salva non perde le penne di NESSUN cliente — il replay del WAL restituisce le put di entrambi [W1]; il secondo gateway cade ad alta voce col cartellino del pid [L2]/[I11]. MISURA della porta: get in-process 4.27 µs contro p50 12.46 µs attraverso il socket (p99 108.88 µs — su MinGW ~96/371 µs): il kernel sta nel mezzo, e il giro a eventi lo serve.
+
+Il post mortem del capitolo ha 40 anni: **Nagle + delayed-ACK** (1984, e il delayed-ACK di Linux): il send da 1 byte del `'\n'` restava nello stomaco del kernel fino a 40 ms — il banco si sarebbe appeso in CI e su Windows il timing benigno lo nascondeva. Cura: `TCP_NODELAY` su socket accettati e cliente (la stessa pillola di Redis), e attese con scadenza nel banco. Obitorio: zero thread (una risposta enorme ritarda le altre — la stessa rinuncia [W6]), zero keepalive in v1, nessuna autenticazione (per questo [L6]).
+
 ## Compilare ed eseguire
 
 Serve `gcc` (MinGW su Windows, gcc su Linux) e `make` (su Windows lo porta MSYS2 come `mingw32-make`; a mano: `gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -o motore_demo motore.c demo_motore.c`). Niente dipendenze.
@@ -134,6 +160,9 @@ make mcp_server         # il server MCP su stdio: ./mcp_server [file.db [tick]]
 make demo_mcp           # il banco del layer MCP: gate [M1]..[M9] + MISURA
 make prefetch_hook      # l'hook pre_agent: ./prefetch_hook [file.db]
 make demo_prefetch      # il banco del prefetcher: gate [P1]..[P7] + MISURA
+make demo_multiagente   # il banco multi-sessione: la gobba del cold start
+make mcp_gateway        # il guscio-2: ./mcp_gateway [file.db [tick]] — la lavagna in ascolto
+make demo_gateway       # il banco della lavagna: gate [L1]..[L6] + MISURA della porta
 make database_quotient  # qualunque capitolo, uno per volta
 ./motore_demo           # esce con EXIT!=0 se un contratto salta
 ```
@@ -176,6 +205,10 @@ demo_prefetch.c        # il banco del prefetcher: gate e MISURA (hit-rate, bilan
 wal.h / wal.c          # il write-ahead log: contratto [W1]..[W6], il replay esatto
 demo_wal.c             # il banco del WAL: crash simulati, coda marcia, taglio
 misura_fsync.c          # la MISURA che ha chiuso la decisione sulla durabilita'
+demo_multiagente.c      # il banco multi-sessione: la gobba del cold start, [B1]..[B6]
+gateway.h / gateway.c  # il gateway: la lavagna a un solo custode, [L1]..[L6]
+mcp_gateway.c           # il guscio-2: la porta TCP su 127.0.0.1
+demo_gateway.c          # il banco della lavagna: processi veri, socket veri, MISURA della porta
 .vibe/hooks.toml       # l'hook montato: pre_agent, fail-open
 Makefile               # make motore_demo | make mcp_server | make <capitolo>
 .gitignore             # eseguibili e file di prova non entrano nel repo
@@ -183,7 +216,7 @@ Makefile               # make motore_demo | make mcp_server | make <capitolo>
 
 ## Dove proseguire
 
-Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. I passi naturali dopo: il tick dentro il file PDB1 (formato v2, per le TTL replayate a orologio mobile), iteratori stabili, concorrenza a un estremo per volta.
+Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. La concorrenza "a un estremo per volta" è arrivata col capitolo 14 (lucchetto, snapshot atomico, gateway) — ma dichiarata nei suoi limiti, non promessa: zero thread, zero keepalive, nessuna autenticazione. I passi naturali dopo: il banco **vivente** — agenti LLM veri (piccoli, effort basso) che si parlano addosso attraverso la lavagna, e il passamano speculative del prefetcher fra traccia di uno e get di un altro; poi il tick dentro il file PDB1 (formato v2, per le TTL replayate a orologio mobile) e iteratori stabili.
 
 ## Licenza
 
