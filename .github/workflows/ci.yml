@@ -82,7 +82,7 @@ jobs:
             [ -n "$PORTA" ] && break
             sleep 0.2
           done
-          R=$( (exec 3<>/dev/tcp/127.0.0.1/$PORTA; printf '{"jsonrpc":"2.0","id":8,"method":"ping"}\n' >&3; timeout 3 cat <&3) )
+          R=$( (exec 3<>/dev/tcp/127.0.0.1/$PORTA; printf '{"jsonrpc":"2.0","id":8,"method":"ping"}\n' >&3; timeout 3 cat <&3) || true )
           echo "risposta del gateway: $R"
           echo "$R" | grep -q '"result":{}' || { echo "GATE ROTTO: il gateway non risponde al cliente"; exit 1; }
           if printf '{"jsonrpc":"2.0","id":9,"method":"ping"}\n' | ./mcp_gateway lav_ci.db > /tmp/secondo.log 2>&1; then
