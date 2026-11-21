@@ -36,6 +36,20 @@ demo_prefetch: demo_prefetch.c prefetch.c json.c motore.c mcp_server.c wal.c pre
 demo_multiagente: demo_multiagente.c prefetch.c json.c motore.c mcp_server.c wal.c prefetch.h json.h motore.h mcp_server.h wal.h
 	$(CC) $(CFLAGS) -o $@ demo_multiagente.c prefetch.c json.c motore.c mcp_server.c wal.c $(LDLIBS)
 
+# la porta si paga solo su Windows (ws2_32): su Linux il kernel la regala
+ifeq ($(OS),Windows_NT)
+  LIBS_PORTA = -lws2_32
+else
+  LIBS_PORTA =
+endif
+
+# il gateway (capitolo 14): la lavagna a un solo custode — guscio-2 TCP
+mcp_gateway: mcp_gateway.c gateway.c mcp_server.c json.c motore.c prefetch.c wal.c gateway.h mcp_server.h json.h motore.h prefetch.h wal.h
+	$(CC) $(CFLAGS) -o $@ mcp_gateway.c gateway.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS) $(LIBS_PORTA)
+
+demo_gateway: demo_gateway.c gateway.c mcp_server.c json.c motore.c prefetch.c wal.c gateway.h mcp_server.h json.h motore.h prefetch.h wal.h
+	$(CC) $(CFLAGS) -o $@ demo_gateway.c gateway.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS) $(LIBS_PORTA)
+
 # il write-ahead log (capitolo 13): il log + il banco; misura_fsync e'
 # la misura che ha chiuso la decisione sulla durabilita' (prima il
 # numero, poi il codice)
@@ -52,6 +66,7 @@ misura_fsync: misura_fsync.c
 clean:
 	rm -f *.exe *.db *.wal *.lock *.db.tmp *.prefetch motore_demo mcp_server demo_mcp \
 	      demo_prefetch demo_wal misura_fsync prefetch_hook \
+	      demo_multiagente mcp_gateway demo_gateway \
 	      database_debug database_indexed \
 	      database_compact database_persist database_learned \
 	      database_semantic database_ring database_quotient \

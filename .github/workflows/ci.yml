@@ -27,7 +27,7 @@ jobs:
           database_persist database_learned database_semantic
           database_ring database_quotient database_persist_semantic
           motore_demo mcp_server demo_mcp prefetch_hook demo_prefetch
-          demo_wal misura_fsync demo_multiagente
+          demo_wal misura_fsync demo_multiagente mcp_gateway demo_gateway
 
       - name: collaudo del motore (ASan + UBSan)
         run: |
@@ -64,6 +64,35 @@ jobs:
               -o multiagente_asan demo_multiagente.c prefetch.c mcp_server.c json.c motore.c wal.c -lm
           ./multiagente_asan
 
+      - name: collaudo del gateway (ASan + UBSan)
+        run: |
+          gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
+              -fsanitize=address,undefined -fno-sanitize-recover=all \
+              -o gateway_asan demo_gateway.c gateway.c mcp_server.c json.c motore.c prefetch.c wal.c -lm
+          ./gateway_asan
+
+      - name: "la lavagna vera: gateway vivo, cliente di bash, secondo gateway rifiutato"
+        run: |
+          rm -f lav_ci.db*
+          printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"salva","arguments":{"nome":"lav_ci.db"}}}\n' | ./mcp_server > /dev/null
+          ./mcp_gateway lav_ci.db > /tmp/gw.log 2>&1 &
+          GWPID=$!
+          for i in $(seq 1 30); do
+            PORTA=$(sed -n 's/gateway: 127.0.0.1:\([0-9]*\) .*/\1/p' /tmp/gw.log)
+            [ -n "$PORTA" ] && break
+            sleep 0.2
+          done
+          R=$( (exec 3<>/dev/tcp/127.0.0.1/$PORTA; printf '{"jsonrpc":"2.0","id":8,"method":"ping"}\n' >&3; timeout 3 cat <&3) )
+          echo "risposta del gateway: $R"
+          echo "$R" | grep -q '"result":{}' || { echo "GATE ROTTO: il gateway non risponde al cliente"; exit 1; }
+          if printf '{"jsonrpc":"2.0","id":9,"method":"ping"}\n' | ./mcp_gateway lav_ci.db > /tmp/secondo.log 2>&1; then
+            echo "GATE [L2] ROTTO: il secondo gateway e' partito"
+            exit 1
+          fi
+          grep -q "I11" /tmp/secondo.log || { echo "il secondo non dichiara la porta occupata"; exit 1; }
+          kill $GWPID
+          rm -f lav_ci.db* /tmp/gw.log /tmp/secondo.log
+
       - name: l'hook pre_agent predice, parcheggia e inietta (filo intero)
         run: |
           printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"put","arguments":{"chiave":"nota/grammi-posizionali","valore":"i grammi del motore sono posizionali: pos entra nell hash, quindi chiedi e un fuzzy-prefix, non una ricerca per tema"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"salva","arguments":{"nome":"ci_memoria.db"}}}\n' | ./mcp_server > /dev/null
@@ -99,7 +128,8 @@ jobs:
                    database_persist database_learned database_semantic \
                    database_ring database_quotient \
                    database_persist_semantic motore_demo demo_mcp \
-                   demo_prefetch demo_wal misura_fsync demo_multiagente; do
+                   demo_prefetch demo_wal misura_fsync demo_multiagente \
+                   demo_gateway; do
             echo "=== $b ==="
             if ./$b; then
               echo "--- $b: verde"
