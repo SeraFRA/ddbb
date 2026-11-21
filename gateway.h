@@ -75,11 +75,26 @@
 
 typedef struct gateway gateway_t;
 
+/* --------------------------------------- helpers condivisi: il bootstrap
+ * dei socket portabili e la cura del Nagle vivono nel file del
+ * CLIENTE (gateway_cliente.c) — una fonte sola. Il custode li usa
+ * via header. */
+int  gateway_porta_init(void);
+void gateway_porta_fini(void);
+void gateway_niente_nagle(int fd);
+
 /* apre la porta SOPRA un server MCP gia' padrone del suo db [L2]:
  * l'ownership del mcp_t resta al chiamante (il gateway non lo chiude).
  * Ritorna NULL se la porta non si apre. *porta riceve la porta TCP
  * scelta dall'OS [L6]. */
 gateway_t *gateway_apri(mcp_t *s, uint32_t *porta);
+
+/* il percorso del file-porta, DERIVATO dal db (regola del repo: un
+ * derivato, una funzione di derivazione sola): il guscio lo scrive
+ * appena la porta e' aperta, i clienti del filo (l'hook prefetch
+ * cliente della lavagna) lo LEGGONO. Un derivato riconoscibile:
+ * gitignored come .prefetch e .lock, MAI nel repo. */
+void gateway_percorso_porta(const char *db, char *out, size_t cap);
 
 /* chiude la porta e libera i buffer dei clienti (NON il mcp_t) */
 void gateway_chiudi(gateway_t *g);

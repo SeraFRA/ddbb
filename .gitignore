@@ -33,6 +33,9 @@ demo_gateway
 *.wal
 # il lucchetto del padrone [I11]: derivato del db, mai nel repo
 *.lock
+# il file-porta del gateway (capitolo 14): derivato del db che il
+# guscio scrive e i clienti del filo leggono [P10], mai nel repo
+*.porta
 # la tmp del salva atomico [I12]: muore col rename, ma un crash a meta'
 # la lascia li' — ignorata, il prossimo salva la riscrive
 *.db.tmp

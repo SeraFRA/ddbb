@@ -99,10 +99,41 @@ static size_t set_bigrammi(uint16_t *out, size_t cap,
     return inserisci_grammi(out, 0, cap, testo, len);
 }
 
+/* predici [P10]: il guscio del motore — l'elenco delle chiavi dallo
+ * snapshot (due passate: prima il totale, poi il batch — l'arena
+ * dell'hook e' privata, non si muove), poi il CUORE fa il resto.
+ * Il cliente della lavagna chiama il cuore direttamente: la
+ * similarita' resta UNA. */
 size_t prefetch_predici(motore_t *m, const char *traccia, size_t tlen,
                         prefetch_predizione_t pred[], size_t max_pred)
 {
     if (!m || !traccia || !pred || max_pred == 0)
+        return 0;
+    size_t totali = 0;
+    motore_intervallo(m, "", 0, "\xff\xff\xff\xff", 4, 0, NULL,
+                      &totali, NULL);
+    if (totali == 0)
+        return 0;
+    if (totali > PREFETCH_CHIAVI_MAX)
+        totali = PREFETCH_CHIAVI_MAX;   /* il tetto dichiarato       */
+    motore_risposta_t *chiavi = malloc(totali * sizeof *chiavi);
+    if (!chiavi)
+        return 0;
+    size_t n_chiavi = motore_intervallo(m, "", 0, "\xff\xff\xff\xff",
+                                        4, totali, chiavi, NULL, NULL);
+    size_t n = prefetch_predici_da_chiavi(chiavi, n_chiavi, traccia,
+                                          tlen, pred, max_pred);
+    free(chiavi);
+    return n;
+}
+
+size_t prefetch_predici_da_chiavi(const motore_risposta_t chiavi[],
+                                  size_t n_chiavi,
+                                  const char *traccia, size_t tlen,
+                                  prefetch_predizione_t pred[],
+                                  size_t max_pred)
+{
+    if (!chiavi || n_chiavi == 0 || !traccia || !pred || max_pred == 0)
         return 0;
 
     /* i token della traccia: inizio e fine, una passata sola */
@@ -177,31 +208,10 @@ size_t prefetch_predici(motore_t *m, const char *traccia, size_t tlen,
         wn[f] = n_set;
     }
 
-    /* le chiavi vive: il scan completo via intervallo, il lavoro che
-     * l'indice ordinato sa fare [P1]. Due passate: prima il totale,
-     * poi il batch — l'arena e' privata dell'hook, non si muove. */
-    size_t totali = 0;
-    motore_intervallo(m, "", 0, "\xff\xff\xff\xff", 4, 0, NULL,
-                      &totali, NULL);
-    if (totali == 0) {
-        free(wset);
-        free(wn);
-        free(tin);
-        free(tfi);
-        return 0;
-    }
-    if (totali > PREFETCH_CHIAVI_MAX)
-        totali = PREFETCH_CHIAVI_MAX;   /* il tetto dichiarato       */
-    motore_risposta_t *chiavi = malloc(totali * sizeof *chiavi);
-    if (!chiavi) {
-        free(wset);
-        free(wn);
-        free(tin);
-        free(tfi);
-        return 0;
-    }
-    size_t n_chiavi = motore_intervallo(m, "", 0, "\xff\xff\xff\xff",
-                                        4, totali, chiavi, NULL, NULL);
+    /* le chiavi arrivano dal CHIAMANTE [P10]: lo snapshot via motore
+     * per l'hook stdio, l'arena viva via filo per il cliente della
+     * lavagna. Il cervello e' lo stesso: la similarita' non si
+     * duplica mai. */
 
     /* i candidati aggregati: chiave copiata, mai un puntatore
      * all'arena [P2] — le risposte del motore muoiono al giro dopo. */
@@ -256,7 +266,6 @@ size_t prefetch_predici(motore_t *m, const char *traccia, size_t tlen,
                                           (uint64_t)chiavi[c].valore_len;
         }
     }
-    free(chiavi);
     free(wset);
     free(wn);
     free(tin);

@@ -58,6 +58,23 @@ int main(int argc, char **argv)
            (argc >= 2) ? argv[1] : "(memoria)");
     fflush(stdout);                       /* il cliente aspetta qui' */
 
+    /* il file-porta, derivato del db: l'hook cliente della lavagna
+     * [P10] lo legge per sapere dove bussare. Se non si scrive, non
+     * e' fatale: e' solo una lavagna che i clienti trovano alla
+     * cieca [L6]. Stale-port dichiarata in gateway.h. */
+    if (argc >= 2) {
+        char pporta[1024];
+        gateway_percorso_porta(argv[1], pporta, sizeof pporta);
+        FILE *fp = fopen(pporta, "w");
+        if (fp) {
+            fprintf(fp, "%u\n", porta);
+            fclose(fp);
+        } else {
+            fprintf(stderr, "[gateway] il file-porta %s non si scrive\n",
+                    pporta);
+        }
+    }
+
     uint64_t giri_muti = 0;
     for (;;) {
         size_t servite = gateway_gira(g, 1000);

@@ -72,6 +72,19 @@
  *       legge lo snapshot PDB1; il consumatore vive nel server che
  *       possiede l'arena. La stalezza e' dichiarata e limitata dalla
  *       convenzione della memoria ("salva dopo scritture pesanti").
+ *  [P10] LA PREDIZIONE NON VUOLE UN MOTORE: VUOLE L'ELENCO DELLE
+ *       CHIAVI. Il motore entra in predici SOLO per enumerarle
+ *       (intervallo). Chiunque possieda l'elenco (chiave, valore_len)
+ *       COPIATO puo' predire: e' la porta per il produttore CLIENTE
+ *       della lavagna (cap. 14): l'hook chiede l'elenco al CUSTODE
+ *       via filo [L3] — e quello che vede e' L'ARENA VIVA, non lo
+ *       snapshot: [P9] si RAFFORZA nel mondo del gateway (lo vedi
+ *       tutto, cio' che il padrone vede). Limiti dichiarati del
+ *       cliente: l'intervallo del filo porta un batch solo (64
+ *       voci: oltre, la lavagna resta non predicibile dall'hook —
+ *       una memoria di lavoro ci sta dentro); il costo [P2] si
+ *       misura sulla forma DECODIFICATA che il filo consegna
+ *       (json.c decodifica: la lunghezza e' quella vera).
  *
  * =====================================================================
  * I LIMITI (dichiarati in testa, non scoperti in produzione)
@@ -133,6 +146,16 @@ typedef struct {
  * "forse" del filtro, come il bloom. */
 size_t prefetch_predici(motore_t *m, const char *traccia, size_t tlen,
                         prefetch_predizione_t pred[], size_t max_pred);
+
+/* il CUORE disaccoppiato dal motore [P10]: l'elenco (chiave,
+ * valore_len) viene da dove il chiamante lo ha (il custode via filo
+ * per l'hook cliente della lavagna). La fonte di verita' della
+ * similarita' E' questa funzione: la predizione non si duplica mai. */
+size_t prefetch_predici_da_chiavi(const motore_risposta_t chiavi[],
+                                  size_t n_chiavi,
+                                  const char *traccia, size_t tlen,
+                                  prefetch_predizione_t pred[],
+                                  size_t max_pred);
 
 /* il contratto su filo [P3]: JSON atomico, una generazione = un
  * turn_id. handle_byte = la spesa di contesto che l'hook sta per

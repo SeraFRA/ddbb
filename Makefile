@@ -24,9 +24,12 @@ mcp_server: mcp_stdio.c mcp_server.c json.c motore.c prefetch.c wal.c mcp_server
 demo_mcp: demo_mcp.c mcp_server.c json.c motore.c prefetch.c wal.c mcp_server.h json.h motore.h prefetch.h wal.h
 	$(CC) $(CFLAGS) -o $@ demo_mcp.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS)
 
-# il prefetcher speculativo (capitolo 12): l'hook pre_agent + il banco
-prefetch_hook: prefetch_hook.c prefetch.c json.c motore.c prefetch.h json.h motore.h
-	$(CC) $(CFLAGS) -o $@ prefetch_hook.c prefetch.c json.c motore.c $(LDLIBS)
+# il prefetcher speculativo (capitolo 12): l'hook pre_agent + il banco.
+# gateway.c entra per il modo CLIENTE della lavagna [P10]: il lato
+# cliente del gateway e il file-porta derivato — la porta si paga solo
+# su Windows.
+prefetch_hook: prefetch_hook.c prefetch.c gateway_cliente.c json.c motore.c prefetch.h gateway.h json.h motore.h
+	$(CC) $(CFLAGS) -o $@ prefetch_hook.c prefetch.c gateway_cliente.c json.c motore.c $(LDLIBS) $(LIBS_PORTA)
 
 demo_prefetch: demo_prefetch.c prefetch.c json.c motore.c mcp_server.c wal.c prefetch.h json.h motore.h mcp_server.h wal.h
 	$(CC) $(CFLAGS) -o $@ demo_prefetch.c prefetch.c json.c motore.c mcp_server.c wal.c $(LDLIBS)
@@ -44,11 +47,11 @@ else
 endif
 
 # il gateway (capitolo 14): la lavagna a un solo custode — guscio-2 TCP
-mcp_gateway: mcp_gateway.c gateway.c mcp_server.c json.c motore.c prefetch.c wal.c gateway.h mcp_server.h json.h motore.h prefetch.h wal.h
-	$(CC) $(CFLAGS) -o $@ mcp_gateway.c gateway.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS) $(LIBS_PORTA)
+mcp_gateway: mcp_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c gateway.h mcp_server.h json.h motore.h prefetch.h wal.h
+	$(CC) $(CFLAGS) -o $@ mcp_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS) $(LIBS_PORTA)
 
-demo_gateway: demo_gateway.c gateway.c mcp_server.c json.c motore.c prefetch.c wal.c gateway.h mcp_server.h json.h motore.h prefetch.h wal.h
-	$(CC) $(CFLAGS) -o $@ demo_gateway.c gateway.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS) $(LIBS_PORTA)
+demo_gateway: demo_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c gateway.h mcp_server.h json.h motore.h prefetch.h wal.h
+	$(CC) $(CFLAGS) -o $@ demo_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS) $(LIBS_PORTA)
 
 # il write-ahead log (capitolo 13): il log + il banco; misura_fsync e'
 # la misura che ha chiuso la decisione sulla durabilita' (prima il

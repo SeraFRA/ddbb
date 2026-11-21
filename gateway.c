@@ -45,29 +45,12 @@ typedef int SOCKET;
 # define closesocket(fd) close((fd))
 #endif
 
-/* ------------------------------------------------- il lato piattaforma */
-
-static int porte_aperte = 0;
-
-static int porta_init(void)
-{
-#if defined(_WIN32)
-    WSADATA d;
-    if (WSAStartup(MAKEWORD(2, 2), &d) != 0)
-        return -1;
-#endif
-    porte_aperte++;
-    return 0;
-}
-
-static void porta_fini(void)
-{
-    if (porte_aperte > 0 && --porte_aperte == 0) {
-#if defined(_WIN32)
-        (void)WSACleanup();
-#endif
-    }
-}
+/* il bootstrap dei socket (init/fini) e il TCP_NODELAY vivono nel
+ * FILE DEL CLIENTE (gateway_cliente.c): il custode li prende da li'.
+ * Il motivo [P10]: l'hook prefetch cliente della lavagna linka il
+ * cliente, NON il custode — altrimenti si trascinerebbe
+ * mcp_gestisci e il server intero dentro un processo che gira a
+ * ogni turno. */
 
 /* il socket non blocca: leggere quando non c'e' niente e' riprovare
  * dopo, non addormentarsi con la lavagna in mano [L4] */
@@ -93,18 +76,8 @@ static int e_di_nuovo_piu_tardi(void)
 #endif
 }
 
-/* NAGLE E' IL NEMICO DEL FILO A RIGHE: il newline da un byte resta
- * nello stomaco del kernel (loopback Linux: delayed-ACK fino a 40ms)
- * e la risposta che dipende da lui muore li'. Il protocollo e'
- * request-response: si disattiva, come fa Redis. (Il post mortem e'
- * nel commit: sui giras a tempo-zero il banco si bloccava, su
- * Windows il timing benigno lo nascondeva.) */
-static void niente_nagle(SOCKET fd)
-{
-    int uno = 1;
-    (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
-                     (const char *)&uno, sizeof uno);
-}
+/* NAGLE: la cura vive nel file del cliente (gateway_niente_nagle):
+ * stessa pillola per il socket accettato e per chi parte. */
 
 /* --------------------------------------------------------- i clienti */
 
@@ -224,7 +197,7 @@ size_t gateway_gira(gateway_t *g, int timeout_ms)
             if (buco < 0 || sblocca(nuovo) != 0) {
                 closesocket(nuovo);
             } else {
-                niente_nagle(nuovo);
+                gateway_niente_nagle((int)nuovo);
                 memset(&g->conn[buco], 0, sizeof g->conn[buco]);
                 g->conn[buco].fd = nuovo;
                 g->conn[buco].in_cap = 4096;
@@ -343,11 +316,11 @@ gateway_t *gateway_apri(mcp_t *s, uint32_t *porta)
 {
     if (!s)
         return NULL;
-    if (porta_init() != 0)
+    if (gateway_porta_init() != 0)
         return NULL;
     gateway_t *g = calloc(1, sizeof *g);
     if (!g) {
-        porta_fini();
+        gateway_porta_fini();
         return NULL;
     }
     g->mo = s;
@@ -357,7 +330,7 @@ gateway_t *gateway_apri(mcp_t *s, uint32_t *porta)
     g->ascolto = socket(AF_INET, SOCK_STREAM, 0);
     if (g->ascolto == INVALID_SOCKET) {
         free(g);
-        porta_fini();
+        gateway_porta_fini();
         return NULL;
     }
     struct sockaddr_in mega;
@@ -369,14 +342,14 @@ gateway_t *gateway_apri(mcp_t *s, uint32_t *porta)
         listen(g->ascolto, 8) != 0 || sblocca(g->ascolto) != 0) {
         closesocket(g->ascolto);
         free(g);
-        porta_fini();
+        gateway_porta_fini();
         return NULL;
     }
     socklen_t l = sizeof mega;
     if (getsockname(g->ascolto, (struct sockaddr *)&mega, &l) != 0) {
         closesocket(g->ascolto);
         free(g);
-        porta_fini();
+        gateway_porta_fini();
         return NULL;
     }
     if (porta)
@@ -393,113 +366,6 @@ void gateway_chiudi(gateway_t *g)
             conn_a_vuoto(&g->conn[i]);
     closesocket(g->ascolto);
     free(g);
-    porta_fini();
+    gateway_porta_fini();
 }
 
-/* --------------------------------------- il lato cliente (del banco e di
- * chi vuole provare la porta senza un client MCP): lettura a BLOCCHI,
- * una recv per risposta — il prezzo della porta e' del kernel, non
- * della lentezza di chi legge */
-
-int gateway_cliente_apri(gateway_cliente_t *c, uint32_t porta)
-{
-    if (!c)
-        return -1;
-    memset(c, 0, sizeof *c);
-    c->fd = -1;
-    if (porta_init() != 0)
-        return -1;
-    SOCKET fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd == INVALID_SOCKET) {
-        porta_fini();
-        return -1;
-    }
-    struct sockaddr_in mega;
-    memset(&mega, 0, sizeof mega);
-    mega.sin_family = AF_INET;
-    mega.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    mega.sin_port = htons((unsigned short)porta);
-    if (connect(fd, (struct sockaddr *)&mega, sizeof mega) != 0) {
-        closesocket(fd);
-        porta_fini();
-        return -1;
-    }
-    niente_nagle(fd);                 /* il cliente non trattiene il
-                                         proprio newline [Nagle post mortem] */
-    c->fd = (int)fd;
-    c->cap = 8192;
-    c->buf = malloc(c->cap);
-    if (!c->buf) {
-        closesocket(fd);
-        porta_fini();
-        c->fd = -1;
-        return -1;
-    }
-    return 0;
-}
-
-void gateway_cliente_chiudi(gateway_cliente_t *c)
-{
-    if (!c || c->fd < 0)
-        return;
-    closesocket((SOCKET)c->fd);
-    free(c->buf);
-    c->buf = NULL;
-    c->fd = -1;
-    porta_fini();
-}
-
-int gateway_cliente_scrivi(gateway_cliente_t *c, const char *buf,
-                           size_t len)
-{
-    if (!c || c->fd < 0)
-        return -1;
-    size_t scritti = 0;
-    while (scritti < len) {
-        int n = (int)send((SOCKET)c->fd, buf + scritti,
-                          (int)(len - scritti), 0);
-        if (n == SOCKET_ERROR)
-            return -1;
-        scritti += (size_t)n;
-    }
-    return 0;
-}
-
-/* la riga gia' nel blocco ricevuto? si. Altrimenti UNA recv per
- * blocco: la syscall e' per il blocco, non per il byte */
-int gateway_cliente_leggi(gateway_cliente_t *c, char *riga, size_t cap)
-{
-    if (!c || !riga || cap == 0)
-        return -1;
-    for (;;) {
-        /* c'e' una riga intera nel blocco gia' letto? */
-        for (size_t p = c->off; p < c->len; p++) {
-            if (c->buf[p] != '\n')
-                continue;
-            size_t l = p - c->off;
-            if (l + 1 > cap)
-                return -1;              /* la riga oltre il cap       */
-            if (l > 0 && c->buf[p - 1] == '\r')
-                l--;
-            memcpy(riga, c->buf + c->off, l);
-            riga[l] = '\0';
-            c->off = p + 1;
-            if (c->off == c->len)
-                c->off = c->len = 0;    /* blocco consumato intero    */
-            return 1;
-        }
-        int letti = (int)recv((SOCKET)c->fd, c->buf + c->len,
-                              (int)(c->cap - c->len - 1), 0);
-        if (letti == SOCKET_ERROR || letti == 0)
-            return (letti == 0) ? 0 : -1;
-        if (c->len + (size_t)letti + 2 > c->cap) {
-            char *nuovo = realloc(c->buf, c->cap * 2);
-            if (!nuovo)
-                return -1;
-            c->buf = nuovo;
-            c->cap *= 2;
-        }
-        c->len += (size_t)letti;
-        c->buf[c->len] = '\0';
-    }
-}

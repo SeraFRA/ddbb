@@ -68,7 +68,7 @@ jobs:
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
               -fsanitize=address,undefined -fno-sanitize-recover=all \
-              -o gateway_asan demo_gateway.c gateway.c mcp_server.c json.c motore.c prefetch.c wal.c -lm
+              -o gateway_asan demo_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c -lm
           ./gateway_asan
 
       - name: "la lavagna vera: gateway vivo, cliente di bash, secondo gateway rifiutato"

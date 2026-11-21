@@ -16,3 +16,16 @@ type = "pre_agent"
 command = "if [ -f ./prefetch_hook.exe ]; then ./prefetch_hook.exe memoria.db; else ./prefetch_hook memoria.db; fi"
 timeout = 10.0
 description = "Prefetch speculativo: predice le chiavi del motore dalla traccia dei pensieri"
+
+# Il produttore CLIENTE della lavagna [P10]: quando un gateway vive su
+# banco_vivo.db (il banco vivente), l'hook chiede l'elenco delle chiavi
+# AL CUSTODE via filo — arena viva, non snapshot. La porta la legge dal
+# file-porta <db>.porta: lavagna spenta = file mancante o porta morta =
+# silenzio (fail-open), costo zero. Il consumo dello staging e' del
+# custode: un agente che serve la lavagna da' il colpo.
+[[hooks]]
+name = "prefetch-lavagna"
+type = "pre_agent"
+command = "if [ -f ./prefetch_hook.exe ]; then ./prefetch_hook.exe banco_vivo.db lavagna; else ./prefetch_hook banco_vivo.db lavagna; fi"
+timeout = 10.0
+description = "Prefetch cliente della lavagna: predice dalla traccia le chiavi vive del custode"
