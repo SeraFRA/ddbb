@@ -72,7 +72,9 @@ int motore_presente(motore_t *m, const char *chiave, size_t klen);
 int motore_compatta(motore_t *m);
 
 /* snapshot compattato, formato del decimo file (PDB1): i due mondi
- * si leggono a vicenda [I10] */
+ * si leggono a vicenda [I10]. Tutto o nulla [I12]: si compone in
+ * <nome>.tmp e si sostituisce con una mossa — chi legge vede o il
+ * file vecchio intero o quello nuovo intero, mai meta' salva */
 int       motore_salva(motore_t *m, const char *nome);
 motore_t *motore_apri_da(const char *nome, uint32_t adesso,
                          size_t *scartate);

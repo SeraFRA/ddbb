@@ -30,3 +30,6 @@ demo_prefetch
 *.wal
 # il lucchetto del padrone [I11]: derivato del db, mai nel repo
 *.lock
+# la tmp del salva atomico [I12]: muore col rename, ma un crash a meta'
+# la lascia li' — ignorata, il prossimo salva la riscrive
+*.db.tmp

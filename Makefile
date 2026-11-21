@@ -45,7 +45,7 @@ misura_fsync: misura_fsync.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDLIBS)
 
 clean:
-	rm -f *.exe *.db *.wal *.lock *.prefetch motore_demo mcp_server demo_mcp \
+	rm -f *.exe *.db *.wal *.lock *.db.tmp *.prefetch motore_demo mcp_server demo_mcp \
 	      demo_prefetch demo_wal misura_fsync prefetch_hook \
 	      database_debug database_indexed \
 	      database_compact database_persist database_learned \

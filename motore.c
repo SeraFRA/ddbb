@@ -47,6 +47,29 @@
  *  [I10] IL DISCO E' QUELLO DEL DECIMO. Stesso MAGIA PDB1, stessa
  *       versione, stesso validatore: i file scritti dal decimo e dal
  *       motore si leggono a vicenda per costruzione.
+ *  [I12] LO SNAPSHOT E' TUTTO O NULLA. Il salva non tocca mai il
+ *       bersaglio: compone <nome>.tmp (regola sola di derivazione),
+ *       lo inchiostra col trittico ridotto del [W2] (fflush +
+ *       sincronizza), lo chiude, e sostituisce con UNA mossa. Chi
+ *       legge il db vede o il file vecchio intero o quello nuovo
+ *       intero, mai il pavimento troncato del fwrite diretto: la
+ *       prima versione apriva il bersaglio in "wb" e bruciava meta'
+ *       file alla volta — un lettore di mezzo (l'hook pre_agent, da
+ *       [I11] il primo di una fila) vedeva un prefisso bugiardo che
+ *       il validatore rimbalzava. Era il buco noto del decimo file;
+ *       [I11] l'ha promosso a prerequisito. FALLIMENTO: la tmp muore
+ *       con la remove, il bersaglio resta COME STAVA, l'errore e'
+ *       dichiarato (MOTORE_ERR_IO): mai meta' salva. LIMITI
+ *       DICHIARATI: due handle che salvano in parallelo lo stesso
+ *       nome pestano la stessa tmp — errore del chiamante (uno
+ *       scrittore [W6], un padrone [I11]); una tmp orfana di un
+ *       crash resta li' ignorata, il prossimo salva la riscrive; SU
+ *       WINDOWS la sostituzione chiede ripensamenti per un tempo
+ *       contato (fino 50 x 10 ms) perche' il lettore che tiene il
+ *       file senza FILE_SHARE_DELETE la blocca — e l'hook e'
+ *       esattamente quel lettore; su POSIX il rename rimappa il nome
+ *       e non tocca l'inode aperto: geometrie platform diverse,
+ *       contratto unico.
  *
  * (I1 fonte unica, I2 identita' della voce, I3 morte atomica,
  *  I4 il disco vede solo l'ora viva e intatta, I5 prefisso sicuro,
@@ -77,6 +100,24 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+
+/* [I12] la sostituzione atomica: il trittico ridotto (fflush +
+ * sincronizza) e la mossa unica. Il pattern e' quello di wal.c [W2]:
+ * una fonte, due file */
+#if defined(_WIN32)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wpedantic"
+# include <windows.h>            /* MoveFileExA, Sleep */
+# pragma GCC diagnostic pop
+# include <io.h>                 /* _fileno, _commit */
+# define sincronizza(fd)  _commit((fd))
+# define fileno_di(f)     _fileno((f))
+#else
+# include <sys/types.h>          /* off_t: unistd.h non basta (gcc 15) */
+# include <unistd.h>
+# define sincronizza(fd)  fsync((fd))
+# define fileno_di(f)     fileno((f))
+#endif
 
 #include "motore.h"
 
@@ -985,22 +1026,74 @@ int motore_salva(motore_t *m, const char *nome)
         if (motore_compatta(m) != MOTORE_OK)
             return MOTORE_ERR_MEMORIA;
 
-    FILE *f = fopen(nome, "wb");
-    if (!f)
+    /* [I12] tutto o nulla: prima in <nome>.tmp, poi UNA mossa sola.
+     * Il fwrite diretto in "wb" bruciava meta' bersaglio alla volta */
+    size_t nlun = strlen(nome);
+    char *nometmp = malloc(nlun + 8);
+    if (!nometmp)
+        return MOTORE_ERR_MEMORIA;
+    memcpy(nometmp, nome, nlun);        /* regola sola: nome + ".tmp" */
+    memcpy(nometmp + nlun, ".tmp", 5);
+
+    FILE *f = fopen(nometmp, "wb");
+    if (!f) {
+        free(nometmp);
         return MOTORE_ERR_IO;
+    }
 
     uint8_t header[12];
     memcpy(header, MAGIA, 4);
     scrivi_u32(header + 4, FORMATO_VERSIONE);
     scrivi_u32(header + 8, (uint32_t)m->n_entry);
 
-    int r = MOTORE_OK;
     if (fwrite(header, 1, sizeof header, f) != sizeof header ||
-        fwrite(m->data, 1, m->usato, f) != m->usato)
-        r = MOTORE_ERR_IO;
-    if (fclose(f) != 0)
-        r = MOTORE_ERR_IO;
-    return r;
+        fwrite(m->data, 1, m->usato, f) != m->usato) {
+        fclose(f);
+        remove(nometmp);            /* la tmp muore, il bersaglio non sa */
+        free(nometmp);
+        return MOTORE_ERR_IO;
+    }
+    /* il trittico ridotto del [W2]: fflush consegna al kernel,
+     * sincronizza al disco. Senza, il rename prometterebbe un file
+     * che un calo di corrente non ha mai visto */
+    if (fflush(f) != 0 || sincronizza(fileno_di(f)) != 0) {
+        fclose(f);
+        remove(nometmp);
+        free(nometmp);
+        return MOTORE_ERR_IO;
+    }
+    if (fclose(f) != 0) {
+        remove(nometmp);
+        free(nometmp);
+        return MOTORE_ERR_IO;
+    }
+
+#ifdef _WIN32
+    /* il lettore che tiene il file senza FILE_SHARE_DELETE (l'hook
+     * pre_agent e' esattamente quello) blocca la sostituzione: si
+     * ripensa per un tempo contato, poi l'errore dichiarato */
+    int sostituito = 0;
+    for (int i = 0; i < 50 && !sostituito; i++) {
+        if (MoveFileExA(nometmp, nome,
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            sostituito = 1;
+        else
+            Sleep(10);
+    }
+    if (!sostituito) {
+        remove(nometmp);
+        free(nometmp);
+        return MOTORE_ERR_IO;
+    }
+#else
+    if (rename(nometmp, nome) != 0) {
+        remove(nometmp);
+        free(nometmp);
+        return MOTORE_ERR_IO;
+    }
+#endif
+    free(nometmp);
+    return MOTORE_OK;
 }
 
 /* e' gia' tutto in ordine? (file del decimo: no; del motore: si') */

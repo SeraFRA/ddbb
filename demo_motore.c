@@ -13,6 +13,10 @@
  *   GATE [I1]    stesse 500 query pre/post reload: confidenze identiche
  *   GATE [I8]    anello: scadenze deterministiche senza un get
  *   GATE [I10]   corruzione e troncamento: prefisso sicuro
+ *   GATE [I12]   lo snapshot e' tutto o nulla: sostituzione con
+ *                una mossa (lettore POSIX aperto: il vecchio file
+ *                resta COMPLETO), e il fallimento non lascia ne'
+ *                meta' salva ne' tmp orfane
  */
 #include <stdlib.h>
 #include <stdint.h>
@@ -26,6 +30,10 @@
 # pragma GCC diagnostic ignored "-Wpedantic"
 # include <windows.h>
 # pragma GCC diagnostic pop
+# include <direct.h>             /* _mkdir: il gate [I12] prova il fallimento */
+#else
+# include <sys/stat.h>           /* mkdir */
+# include <unistd.h>             /* rmdir: in unistd.h, per la CI */
 #endif
 
 #include "motore.h"
@@ -105,6 +113,26 @@ static int corrompi_byte(const char *nome, long off)
     fputc(c ^ 0x5A, f);
     fclose(f);
     return 0;
+}
+
+/* un bersaglio impossibile per il gate [I12]: la sostituzione su una
+ * directory esistente deve fallire, pulita */
+static void crea_dir(const char *percorso)
+{
+#ifdef _WIN32
+    _mkdir(percorso);
+#else
+    mkdir(percorso, 0700);
+#endif
+}
+
+static void rimuovi_dir(const char *percorso)
+{
+#ifdef _WIN32
+    _rmdir(percorso);
+#else
+    rmdir(percorso);
+#endif
 }
 
 static int tronca_file(const char *nome, long togli)
@@ -820,6 +848,97 @@ static int autotest(void)
         motore_chiudi(p);
     }
 
+    /* H: [I12] lo snapshot e' tutto o nulla */
+    {
+        motore_t *a = motore_apri();
+        if (!a)
+            return 1;
+        motore_put(a, "chiave-a", 8, "vecchio", 7, 0);
+        if (motore_salva(a, "prova_atomica.db") != MOTORE_OK) {
+            printf("autotest FALLITO [H]: il primo salva\n");
+            errori++;
+        }
+#ifndef _WIN32
+        long dim_vecchio = dimensione_file("prova_atomica.db");
+#endif
+        motore_put(a, "chiave-a", 8, "nuovo", 6, 0);
+        motore_put(a, "chiave-b", 8, "bb", 2, 0);
+
+#ifndef _WIN32
+        /* il lettore aperto sul vecchio inode: il rename POSIX rimappa
+         * il nome e non lo tocca — il vecchio file resta COMPLETO sotto
+         * i suoi occhi mentre il nuovo ne piglia il posto. Su Windows la
+         * geometria e' l'altra e sta dichiarata in [I12] */
+        FILE *lett = fopen("prova_atomica.db", "rb");
+#endif
+        if (motore_salva(a, "prova_atomica.db") != MOTORE_OK) {
+            printf("autotest FALLITO [H]: la sostituzione con una mossa\n");
+            errori++;
+        }
+#ifndef _WIN32
+        if (lett) {
+            fseek(lett, 0, SEEK_END);
+            long vista = ftell(lett);
+            if (vista != dim_vecchio) {
+                printf("autotest FALLITO [H]: il lettore ha visto il"
+                       " file cambiargli sotto i piedi: %ld su %ld\n",
+                       vista, dim_vecchio);
+                errori++;
+            }
+            fclose(lett);
+        }
+#endif
+        motore_chiudi(a);
+
+        size_t sc_h = 1;
+        motore_t *v = motore_apri_da("prova_atomica.db", 0, &sc_h);
+        if (v) {
+            uint32_t dl = 0;
+            const uint8_t *val = motore_get(v, "chiave-a", 8, &dl);
+            if (sc_h != 0 || !val || dl != 6 ||
+                    memcmp(val, "nuovo", 6) != 0 ||
+                    motore_get(v, "chiave-b", 8, NULL) == NULL) {
+                printf("autotest FALLITO [H]: il sostituito non e' il"
+                       " nuovo INTERO (scartate %zu)\n", sc_h);
+                errori++;
+            } else if (!errori) {
+                printf("autotest [H]: la sostituzione e' una mossa sola:"
+                       " il bersaglio cambia nome in toto: OK\n");
+            }
+            motore_chiudi(v);
+        } else {
+            printf("autotest FALLITO [H]: il sostituito non ricarica\n");
+            errori++;
+        }
+
+        /* il fallimento: sostituire una DIRECTORY non si puo' — e il
+         * contratto dice che il bersaglio resta com'era e la tmp muore */
+        crea_dir("unadir.db");
+        motore_t *a2 = motore_apri();
+        if (a2) {
+            motore_put(a2, "x", 1, "y", 1, 0);
+            int r_salva = motore_salva(a2, "unadir.db");
+            int tmp_viva = (fopen("unadir.db.tmp", "rb") != NULL);
+            if (r_salva != MOTORE_ERR_IO || tmp_viva) {
+                printf("autotest FALLITO [H]: salva impossibile -> %d,"
+                       " tmp orfana %d (attesi -4 e 0)\n",
+                       r_salva, tmp_viva);
+                errori++;
+            } else if (!errori) {
+                printf("autotest [H]: il fallimento e' pulito: errore"
+                       " dichiarato, tmp morta, nessuna meta' salva: OK\n");
+            }
+            motore_chiudi(a2);
+        }
+        /* gate implicito: se il salva avesse toccato il bersaglio, la
+         * directory non sarebbe piu' una directory e _rmdir fallirebbe */
+        rimuovi_dir("unadir.db");
+        remove("prova_atomica.db");
+        remove("prova_atomica.db.tmp");
+    }
+
+    if (errori)
+        return errori;
     remove("prova_m.db");
     return errori;
 }
