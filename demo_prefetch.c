@@ -55,6 +55,23 @@
 #define N_FILLER     200
 #define N_CAMPIONI   200
 
+/* POST MORTEM (CI del 21-11 su 87a6659): le soglie p99 del [MISURA] sono
+ * sul calendario e il calendario, sotto i sanitizers, mente: il consuma
+ * vale 2-5x perche' misura il sanitizer, non il software. Prova su una
+ * macchina gemella del runner: bbab50c (verde su GitHub) cade a 2246 us,
+ * 87a6659 cade a 4559 us -- lo stesso codice, capricci del processore. La
+ * soglia giusta al regime giusto: x5 DICHIARATO sotto ASan (gcc che
+ * accende __SANITIZE_ADDRESS__; l'UBSan viaggia sempre in coppia con lui
+ * nella CI, basta un testimone), x1 nel build normale. Il gate NON si
+ * spegne mai: una regressione algoritmica (un O(n^2) vero) sfonda il x5
+ * come sfonderebbe lo x1; la custode delle soglie strette resta il run
+ * senza sanitizers, che la CI gia' fa nel passo make. */
+#if defined(__SANITIZE_ADDRESS__)
+#define SOGLIA_X 5.0
+#else
+#define SOGLIA_X 1.0
+#endif
+
 /* ----------------------------------------------------------- utilita' */
 
 static double ora_us(void)
@@ -658,19 +675,19 @@ int main(void)
            p50, p99, PREFETCH_FINESTRE_MAX, PREFETCH_SOGLIA);
     printf("     consuma:  p50 %8.1f us  p99 %8.1f us\n", c50, c99);
     printf("     tocca:   p50 %8.1f us  p99 %8.1f us\n", k50, k99);
-    if (p99 >= 10000.0) {
+    if (p99 >= 10000.0 * SOGLIA_X) {
         fprintf(stderr, "GATE [MISURA] ROTTO: predici p99 %.1f us"
-                        " >= 10000 us\n", p99);
+                        " >= %.0f us\n", p99, 10000.0 * SOGLIA_X);
         return 1;
     }
-    if (c99 >= 2000.0) {
+    if (c99 >= 2000.0 * SOGLIA_X) {
         fprintf(stderr, "GATE [MISURA] ROTTO: consuma p99 %.1f us"
-                        " >= 2000 us\n", c99);
+                        " >= %.0f us\n", c99, 2000.0 * SOGLIA_X);
         return 1;
     }
-    if (k99 >= 20.0) {
+    if (k99 >= 20.0 * SOGLIA_X) {
         fprintf(stderr, "GATE [MISURA] ROTTO: tocca p99 %.1f us"
-                        " >= 20 us\n", k99);
+                        " >= %.0f us\n", k99, 20.0 * SOGLIA_X);
         return 1;
     }
 
