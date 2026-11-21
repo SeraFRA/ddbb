@@ -526,7 +526,7 @@ size_t prefetch_traccia_da_journal(const char *dir_sessione,
 
     /* i confini di riga, dalla fine verso l'inizio: la coda e' il
      * pensiero piu' recente [P1] */
-    size_t *righe = malloc((leggi / 16 + 2) * sizeof *righe);
+    size_t *righe = malloc((leggi + 1) * sizeof *righe);
     if (!righe) {
         free(buf);
         return 0;
@@ -562,12 +562,34 @@ size_t prefetch_traccia_da_journal(const char *dir_sessione,
 
     /* assembla dal piu' VECCHIO al piu' NUOVO: la coda della traccia
      * e' il pensiero vivo, e le finestre guardano la coda [P1] */
-    size_t scritti = 0;
-    for (size_t t = n_testi; t-- > 0;) {
-        if (scritti >= cap)
+    /* il taglio NON porta via i piu' recenti [P1]: sotto cap, si salta
+     * dall'inizio (i testi piu' vecchi, indici alti: testi[0] e' il
+     * pensiero piu' nuovo) finche' la coda non ci sta. Pre-scansione
+     * dai piu' nuovi: t_max = ultimo indice che entra, e la scrittura
+     * resta dall'alba al crepuscolo, con la coda viva [P1].
+     * POST MORTEM (giro del 21-11): tagliava la coda — proprio i testi
+     * che le finestre guardano — perche' riempiva senza guardare. */
+    size_t somma = 0, t_max = (size_t)-1;
+    for (size_t t = 0; t < n_testi; t++) {
+        somma += lunghezze[t] + 1;      /* il '\n'                         */
+        if (somma > cap)
             break;
-        size_t spazio = cap - scritti;
-        size_t prendi = lunghezze[t] < spazio ? lunghezze[t] : spazio;
+        t_max = t;
+    }
+    if (t_max == (size_t)-1)
+        return 0;                       /* nemmeno il piu' nuovo entra */
+    size_t scritti = 0;
+    /* POST MORTEM (secondo giro): il ciclo qui sotto partiva da n_testi
+     * fino a t_max+1: cioe' scriveva esattamente i testi SCARTATI e
+     * saltava i tenuti (0..t_max); con tutto che entra, il range era
+     * vuoto e la traccia usciva di lunghezza zero — il gate [P7] l'ha
+     * preso subito. Il range giusto e' il complemento: da t_max al piu'
+     * nuovo, sempre dal vecchio verso il nuovo, coda viva [P1]. */
+    for (size_t t = t_max + 1; t-- > 0;) {
+        size_t resto = cap - scritti;
+        if (resto < 2)
+            break;
+        size_t prendi = lunghezze[t] < resto ? lunghezze[t] : resto;
         memcpy(traccia + scritti, testi[t], prendi);
         scritti += prendi;
         if (scritti < cap)

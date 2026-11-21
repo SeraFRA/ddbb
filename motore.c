@@ -173,6 +173,7 @@ struct motore {
     size_t    capacita, usato, spazzatura;
     slot_t  *slot;
     size_t   n_slot, n_entry, n_tomb;
+    size_t   n_fantasma;  /* slot con id1 vivo e voce morta [I3] */
     /* orologio del chiamante [I8] */
     uint32_t adesso;
     uint64_t scadute_batch;
@@ -443,6 +444,7 @@ static void muore(motore_t *m, size_t id)
     m->spazzatura += entry_dim(m->data + off);
     m->voci[id].off1 = VOCE_MORTA;
     m->n_entry--;
+    m->n_fantasma++;    /* lo slot resta preso fino alla compattazione */
 }
 
 /* -------------------------------------------------------- indice esatto */
@@ -577,7 +579,13 @@ static int derivo(motore_t *m, size_t off, int aggiorna)
     uint32_t ttl  = leggi_u32(e + 12);
     const char *key = (const char *)(e + DIM_HEADER);
 
-    if ((m->n_entry + m->n_tomb + 1) * 10 > m->n_slot * LOAD_FACTOR_10)
+    /* il fantasma conta: uno slot con voce morta e' fisicamente preso
+     * (muore solo in compattazione) [I7]. POST MORTEM (giro del 21-11):
+     * la condizione guardava solo n_entry+n_tomb; con ttl=1 e scadenze
+     * pigre la tabella si riempiva di fantasmi con load-factor cieco
+     * e trova_slot girava per sempre. */
+    if ((m->n_entry + m->n_tomb + m->n_fantasma + 1) * 10
+            > m->n_slot * LOAD_FACTOR_10)
         if (cresci_slot(m) != MOTORE_OK)
             return MOTORE_ERR_MEMORIA;
 
@@ -657,6 +665,7 @@ static int deriva_db(motore_t *m)
     if (m->bloom_m)
         memset(m->bloom_bit, 0, (m->bloom_m + 7) / 8);
     m->n_entry = m->n_tomb = m->n_voci = 0;
+    m->n_fantasma = 0;                  /* gli slot si ricostruiscono   */
     m->gram_usati = 0;
     m->ruota_usati = 0;
 
