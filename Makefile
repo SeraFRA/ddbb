@@ -31,6 +31,11 @@ prefetch_hook: prefetch_hook.c prefetch.c json.c motore.c prefetch.h json.h moto
 demo_prefetch: demo_prefetch.c prefetch.c json.c motore.c mcp_server.c wal.c prefetch.h json.h motore.h mcp_server.h wal.h
 	$(CC) $(CFLAGS) -o $@ demo_prefetch.c prefetch.c json.c motore.c mcp_server.c wal.c $(LDLIBS)
 
+# il banco multi-sessione (la gobba del cold start): N sessioni corte e
+# lunghe, prefetch on/off, il gate che decide se il gateway vale un mese
+demo_multiagente: demo_multiagente.c prefetch.c json.c motore.c mcp_server.c wal.c prefetch.h json.h motore.h mcp_server.h wal.h
+	$(CC) $(CFLAGS) -o $@ demo_multiagente.c prefetch.c json.c motore.c mcp_server.c wal.c $(LDLIBS)
+
 # il write-ahead log (capitolo 13): il log + il banco; misura_fsync e'
 # la misura che ha chiuso la decisione sulla durabilita' (prima il
 # numero, poi il codice)
