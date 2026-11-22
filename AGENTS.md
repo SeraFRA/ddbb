@@ -66,8 +66,9 @@ Per l'AI che ci lavora e per l'umano che la guida. Nasce da dieci capitoli
 
 ## Questo repo specificamente
 
-- **Lingua**: italiano ovunque — commenti, commit, output dei demo.
-  Il README esiste anche in inglese (`README.en.md`).
+- **Lingua**: italiano ovunque — commenti, commit, output dei demo, racconto
+  (`didattica/README.md`). La FACCIA internazionale è `README.md`, in
+  inglese: TL;DR, comandi, numeri — per chi arriva freddo da GitHub.
 - `didattica/database.c` è il **fossile**: i suoi bug sono didattici, NON
   si toccano.
 - I `didattica/database_*.c` sono il **corpus storico** (la cartella è il

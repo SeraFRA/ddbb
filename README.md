@@ -1,238 +1,90 @@
-# progettodatabase
-
 [![ci](https://github.com/SeraFRA/ddbb/actions/workflows/ci.yml/badge.svg)](https://github.com/SeraFRA/ddbb/actions/workflows/ci.yml)
 
-[English](README.en.md) | Italiano
+**An in-memory key-value store in pure C11 — native TTL, a WAL that survives crashes, a shared blackboard for agents, and an MCP layer that turns it into a tool any LLM agent can call.**
 
-**Un database in C puro, nato da un array di valori contigui e cresciuto fino a un motore con persistenza, indice appreso, memoria semantica — e un layer MCP che lo rende uno strumento chiamabile dagli agenti.**
+Zero dependencies: C11 and the standard library, one binary. Every claim in this README is a gate that runs in CI at every push; every number is measured, never promised. The full story of the project — the educational path, all fourteen chapters with their post mortems, real agent runs — is in Italian in [didattica/README.md](didattica/README.md).
 
-Progetto didattico per autodidatti: ogni file è un capitolo autonomo e compilabile, verificato con test automatici e **numeri misurati contro la teoria** — mai promessi, sempre misurati. Zero librerie esterne: solo C11 e la stdlib. La storia è per interi commit: ogni capitolo ha il suo post mortem nel messaggio di commit.
+## TL;DR
 
----
-
-## Come è nato: la collaborazione
-
-Questo repo è anche il verbale di una collaborazione fra un autore umano e un'AI di programmazione (Mistral Vibe). La prima richiesta non è stata "sistemami il codice" ma *"dammi degli hint per il debug, fammi imparare qualcosa"*: il contratto era capire, non avere. Da lì il metodo, rimasto uguale per dieci capitoli:
-
-1. **l'autore porta la direzione come metafora** — mai come specifica;
-2. **l'AI traduce la metafora in meccanica** (nome della tecnica, matematica, controparte nel mondo reale);
-3. **la meccanica va sotto misura**: numeri confrontati con la teoria, sempre;
-4. **i test sono rigidi e vincolano anche l'AI**: la demo esce con EXIT≠0 se un contratto salta, e ogni bug dell'AI finisce in un post mortem scritto nel punto esatto del codice dove è successo.
-
-Le metafore sono state il vero motore del design. Le principali:
-
-| l'autore ha detto | tradotta in meccanica, è diventata | nel capitolo |
-|---|---|---|
-| "un dipendente che si ricorda dove mette i prodotti negli scaffali, e li trova grazie alla probabilità delle volte prima" | **indice learned**: la previsione della posizione sostituisce la partenza a caso; l'invariante è che chi cambia la sua "memoria" ricostruisce la tabella | `didattica/database_learned.c` |
-| "un database che si comporti come la memoria umana: ogni cosa collegata e vicina in uno spazio semantico probabilistico" | **MinHash + banding LSH**: lo spazio semantico è l'insieme dei bigrammi posizionali; due chiavi sono "vicine" se condividono pezzi; la probabilità d'incontro è la firma | `didattica/database_semantic.c` |
-| "un db che non sia puramente determinista: dia risposte probabili, rispondendo alle domande con le sue entry" | la **confidenza dichiarata**: hit esatto → 1.0; refuso → top-k col valore, gruppo dei pari-merito quando la verità è ambigua, silenzio quando non c'è niente da dire | `db_chiedi` / `motore_chiedi` |
-| "i dati che scadono non vanno controllati a ogni lettura" | **timing wheel**: la scadenza smette di essere un calcolo e diventa un luogo dell'anello | `didattica/database_ring.c` |
-
-Il punto onesto: l'AI ha proposto anche capitoli per conto suo (Bloom/quotient, persistenza), ma le intuizioni che hanno girato il progetto verso il probabilistico sono tutte dell'autore — ed è lì che sta il valore della collaborazione: le metafore umane hanno scelto **quali** tecniche meritavano di esistere, l'AI ha scelto **come** farle funzionare e ne ha pagato i bug, documentandoli.
-
-Il metodo si è affilato col tempo fino all'esperimento **invariants-first** del decimo capitolo: contratto scritto prima del codice. Prima il ciclo era *codice → bug → post mortem*, per tre capitoli di fila; poi il ciclo si è invertito — 8 trappole catturate a tavolino prima di scrivere una riga, 1 al primo run, e il bug scappato ha detto esattamente quale asserzione mancava nei test. Il verdetto dell'esperimento è nel commit del decimo capitolo e nell'header del motore.
-
-Cosa ha insegnato, in una frase: una metafora umana più un test che sa fallire valgono più di cento righe generate — perché vincolano la direzione, non solo la sintassi.
-
----
-
-## La mappa dei capitoli
-
-| # | file | what's in it | nel mondo reale si chiama | il numero da ricordare |
-|---|------|--------------|---------------------------|------------------------|
-| 0 | `didattica/database.c` | il punto di partenza: array contiguo di entry, il codice originale con i suoi bug didattici — lasciato intonso: è il fossile | — | — |
-| 1 | `didattica/database_debug.c` | la prima sistemazione: bug di frontiera, strumenti di ispezione, marker `FIX` | debugging | — |
-| 2 | `didattica/database_indexed.c` | buffer append-only + indice hash | **Bitcask** (append-only log + hash in RAM) | get O(1), catene di probing |
-| 3 | `didattica/database_compact.c` | tombstone, compattazione O(n), percentili p50/p90/p99 | il **merge** degli LSM | la distribuzione batte la media |
-| 4 | `didattica/database_persist.c` | CRC-32 per entry, snapshot compattati, load validato: prefisso sicuro | checksum + snapshot (SQLite, RocksDB) | 1 byte corrotto = persa solo quell'entry |
-| 5 | `didattica/database_learned.c` | spline sulla CDF delle chiavi al posto dell'hash di partenza | **learned index** (Kraska 2017) | l'invariante: cambi la funzione di partenza → ricostruisci |
-| 6 | `didattica/database_semantic.c` | bigrammi posizionali + MinHash + banding LSH: il db che capisce i refusi | **MinHash/LSH** (Broder 1997) | refusi ripescati nel top-8, ambiguità dichiarata |
-| 7 | `didattica/database_ring.c` | la scadenza come LUOGO (anello di tick) + delete a backshift | **timing wheel** (kernel Linux) | scadenze in batch, O(1) ammortizzato |
-| 8 | `didattica/database_quotient.c` | Bloom e quotient filter, la contabilità dei bit | **Bloom 1970 / Bender 2012** | falsi positivi misurati 0.777% vs 0.82% di teoria |
-| 9 | `didattica/database_persist_semantic.c` | la fusione: la risposta semantica viene dal disco, col valore — con l'esperimento *invariants-first* | — | 0 sbagliate su 60000 verifiche dal disco |
-| 11 | `mcp_server.c` + `mcp_stdio.c` | il layer MCP: il motore come strumento per un agente LLM — 10 tool, confidenza sempre dichiarata, `presente` batch | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms del giro LLM |
-| 12 | `prefetch.c` + `prefetch_hook.c` | il prefetcher speculativo: un hook pre_agent legge la traccia dei pensieri dell'agente, predice le chiavi che serviranno e le parcheggia accanto al motore con TTL in richieste; il server MCP consuma lo staging e conta i colpi | **prefetch speculativo** (quello delle CPU, applicato all'IO dell'agente) | hit-rate 1.00 sul filo intero del banco, soglia 0.50 |
-| 13 | `wal.c` + `misura_fsync.c` | il write-ahead log: le intenzioni si inchiostrano una per una (fwrite+fflush+fsync) prima di toccare il motore; il replay ricostruisce tutto fra due snapshot, la coda marcia si tronca | **WAL** (Bitcask, Postgres, SQLite) | 216 µs per put durabile (p50), il replay è esatto: 212/212 |
-| 14 | `demo_multiagente.c` | il banco che ha deciso il gateway: la gobba del cold start misurata PRIMA di costruire — sessioni brevi e lunghe, stesso compito, prefetch ON/OFF, costi del filo vero | benchmark-first ("misurato prima, deciso dopo") | la gobba: margine 70.9% (sessioni brevi) contro 38.4% (lunghe) |
-| 14 | `gateway.c` + `mcp_gateway.c` | la lavagna a un solo custode: UN processo possiede il motore [I11], N clienti parlano al filo MCP invariato [L3] attraverso una porta TCP su 127.0.0.1 — A scrive, B legge senza salva | **blackboard** (Hearsay-II, Linda 1985) — il modello a server unico di Redis | get in-process 4.27 µs, attraverso la porta p50 12.46 µs |
-
-## Il motore unico
-
-I capitoli sono dimostrativi monofunzione; `motore.h` + `motore.c` li consolidano in **un solo sistema** con API pubblica (handle opaco) e contratto scritto:
-
-```c
-motore_t *m = motore_apri();
-motore_put(m, chiave, klen, valore, vlen, ttl);     /* con TTL */
-motore_get(m, chiave, klen, &vlen);                 /* o NULL: mai bugie */
-motore_chiedi(m, query, qlen, k, risposte, &cand);  /* esatto -> conf 1.0;
-                                                       miss -> top-k semantico
-                                                       col valore */
-motore_intervallo(m, da, dalen, a, alen, k, out, &tot, NULL); /* [da..a]:
-                                                       l'hash non sa farlo */
-motore_avanza(m, t);                                 /* l'orologio e' tuo [I8] */
-motore_salva(m, "m.db");                             /* formato del capitolo 9 */
-motore_audit(m, &dichiarate);                        /* l'invariante [I7] in API */
-```
-
-Il cuore architetturale è l'invariante **[I7]: ogni entry viva È la versione corrente della sua chiave** — ogni morte (delete, scadenza, sorpasso) lascia il segno nello stesso istante in cui lascia il conto. Da qui: lo scan per intervalli è una passeggiata di byte senza lookup, e la coda post-compattazione si fonde da sola.
-
-Cosa **non** è entrato nel motore, e perché (l'obitorio): la delete a backshift (il motore ha la compattazione che ripulisce i tombstone: il backshift vince solo senza), il quotient filter (è un indice di appartenenza per chi non ha l'indice esatto), la spline lineare del capitolo 5 (qui il recinto a chiave piena è esatto per costruzione).
-
-## Il layer MCP: il motore come strumento (capitolo 11)
-
-Metafora: *l'agente non deve conoscere il motore, deve poterlo chiamare — e ogni risposta deve dichiarare quanto vale.* Meccanica: un server MCP (spec 2025-06-18, JSON-RPC 2.0 su stdio) sopra l'**API pubblica** del motore, senza toccarne l'interno: `mcp_stdio.c` (il guscio: una riga JSON in, una riga JSON out), `mcp_server.c` (il nucleo `mcp_gestisci`, puro e testabile in process), `json.c` (parser minimale scritto a mano: zero dipendenze, e **una fonte di verità sola** — lo usa il filo e lo usa il banco per verificare le risposte). Il contratto è [M1]..[M11], scritto prima del codice:
-
-- **meno round-trip possibile**: `chiedi` torna chiave E valore E confidenza (mai solo le chiavi: la seconda chiamata per i valori è il bug economico); `intervallo` torna il batch più il totale; `presente` è batch (fino a 256 chiavi per chiamata).
-- **la confidenza viaggia sempre**: confidenza bassa = l'agente sa che può ritentare con un'altra formulazione. Auto-correzione a un solo giro in più.
-- **`presente` come pre-filtro**: "certamente no" [I9] a costo quasi zero — l'agente decide se vale la pena spendere la chiamata.
-- **`audit` come tool**: il contratto rotto è visibile anche all'agente, che può non fidarsi e verificare.
-- **i limiti sono la description**: la similarità è SINTATTICA (bigrammi + MinHash), non semantica — è la parte che l'LLM legge prima di chiamare.
-- **l'orologio è del chiamante [I8]**: `avanza` è un tool; il server non legge mai l'orologio da muro.
-
-I numeri del banco `demo_mcp` (misurati, gate incluso): get p50 2.1 µs / p99 2.3 µs, risposta 149 byte (~37 token); `chiedi` su refusi p50 9.5 µs, verità nel top-8 all'88%; `presente` batch-64 in 15 µs; `intervallo` su finestre di 100 in 23 µs. Un compito tipico è **un round-trip solo**: il costo di ogni interrogazione è il giro LLM (10²..10³ ms di generazione), e il layer lo minimizza. Il banco misura anche il ciclo di vita del bloom: 90.6% di "forse" sugli alieni prima della ricomposizione (filtro stantio, 3072 bit), 0/32 dopo il giro del disco — il derivato si raddrizza da solo, dichiarato non nascosto.
-
-Posizionamento, detto onestamente: non competiamo con Mem0/Zep/Letta sul loro piano (loro sono logica di estrazione LLM-based); siamo **il piano sotto** — il substrato di storage in-process, deterministico, zero-dipendenze, TTL nativo. Il confronto giusto è con Redis/Qdrant come backend, e la nicchia è la memoria embedded/edge dove una chiamata LLM per `add()` è inaccettabile. Il costo nostro è in domanda (ogni interrogazione è generazione di token), il loro in scrittura (ogni messaggio ingerito passa da un LLM): per un agente che scrive molto e interroga selettivamente, il nostro modello è più economico di un fattore enorme.
-
-E l'uso che chiude il cerchio: montato come MCP server in un agente (per esempio Mistral Vibe), il motore diventa nativamente chiamabile — il debugging del progetto passa dallo strumento che il progetto fornisce. Il banco resta la misura; l'agente è la testimonianza.
-
-## Il prefetcher speculativo: la memoria che guarda i pensieri (capitolo 12)
-
-Metafora: *la CPU prefetcha le istruzioni guardando lo stream; il database prefetcha guardando lo stream di ragionamento dell'agente.* Estrarre costa ~zero, ragionare costa caro: allora estraiamo più di quanto serve, adesso — ma in parcheggio, non in contesto: la finestra dell'LLM è la risorsa cara, ciò che è estratto non entra finché non serve.
-
-La geometria è due processi e un file:
-
-- **il produttore** è l'hook `pre_agent` (`prefetch_hook.c`): a ogni turno riceve il prompt, legge la traccia dei pensieri recenti dal journal della sessione, predice fino a 4 chiavi e le scrive in uno staging atomico (`<db>.prefetch`, tmp + rename); se ha qualcosa, inietta nel contesto un handle one-liner ("disponibili anche questi, confidenza 0.4/0.31/0.2") — l'agente tira solo ciò che gli serve. Fail-open totale: ogni errore dell'hook è silenzio, la sessione non si ferma mai per colpa della speculazione.
-- **il consumatore** è il server MCP: a ogni richiesta consuma lo staging (una generazione, una consumazione), parcheggia le predizioni accanto al motore e le conta; una `get` riuscita su una chiave parcheggiata è un **colpo**; il tool `prefetch_stat` espone hit-rate e bilancio in byte (risparmio delle scoperte evitate meno spesa degli handle iniettati).
-- **la speculazione scade da sola**: le predizioni nascono con TTL di 32 richieste e muoiono in batch O(1) ammortizzato — il prefetcher sbagliato si smaltisce da sé, speculazione con oblio incorporato. E il dedup non prefetcha ciò che l'agente ha già in traccia.
-
-Il post mortem del capitolo, che è anche la sua lezione: la prima versione prediceva con `chiedi` del motore — ma i grammi del motore sono **posizionali** (`pos` entra nell'hash), quindi `chiedi` è un fuzzy-PREFIX, non una ricerca per tema: prediceva solo le chiavi già verbatim nella traccia, proprio quelle che il dedup scarta. La similarità per tema vive nel layer: bigrammi non posizionali, finestre di 5 token sulle ultime 64, Jaccard con soglia 0.12, scan delle chiavi via `motore_intervallo`. Effimera, mai un secondo indice persistente.
-
-I numeri del banco `demo_prefetch` (misurati, gate incluso): `predici` su 8 KB di traccia p50 906 µs / p99 1.16 ms — **una volta per turno**, contro i 10²..10³ ms del giro LLM; `consuma` p50 61 µs a ogni richiesta; `tocca` (il colpo) ~0 µs. Il gate end-to-end attraversa il filo MCP: hit 1, spesa 120 byte, risparmio 500 byte, bilancio +380, hit-rate 1.00 contro soglia 0.50 — EXIT≠0 se un tool mente sulla confidenza o se il bilancio diverge. E il limite dichiarato: le predizioni sono "forse" (similarità sintattica sulla traccia, non semantica), l'hit-rate basso significa che la speculazione inquina più di quanto risparmia — e il dato si dichiara anche quando smentisce l'idea.
-
-Il verdetto della sessione vera è arrivato, ed è onesto in entrambe le direzioni. Su un progetto reale durato due giornate (trascrizione vocale, un agente solo, debug su codice già in contesto) il protocollo di misura ha raccolto: hit-rate 0.10-0.11 contro soglia 0.50, bilancio **−4231 byte** — quando il lavoro è tutto su contesto noto, la speculazione inquina più di quanto risparmia, e il numero lo dice. Nelle sessioni che riprendono temi a distanza di giorni (la memoria contiene cose FUORI dal contesto: consegne, post mortem, ricerche) lo stesso strumento sta a hit-rate 1.00 e bilancio +1874. La lezione di campo: **il prefetcher paga sulla distanza tra memoria e contesto** — e la soglia numerata esiste proprio per poterlo dichiarare. Nel rosso, due meriti: le 7 predizioni sbagliate sono morte da sole nel TTL (l'oblio incorporato ha smaltito l'inquinamento), e il dato deludente è la partenza dichiarata per il futuro: una soglia che non sa adattarsi all'hit-rate e un dedup che guarda le chiavi ma non i valori già in contesto.
-
-### Il banco vivente: agenti LLM veri sulla lavagna ([P10])
-
-Dal capitolo 14 in poi l'hook sa essere **cliente della lavagna**: le chiavi non si leggono più dallo snapshot ma si chiedono al custode via filo ([P10] in `prefetch.h`) — e quello che vede è l'arena viva. Tre corse con agenti GLM veri (cold start, un solo turno, same task per regime), ciascuna col suo verdetto onesto:
-
-| lavagna | richieste | byte letti dal filo | colpi del parcheggio | esito |
-|---|---|---|---|---|
-| 3 chiavi, valori corti | 4 (3 get + audit) | — | **3/3, hit-rate 1.00** | l'agente ha tirato le proposte e basta: bilancio **+81 byte** |
-| 40 chiavi, 4 namespace | 4 | 6926 | 2/4 offerte usate | pareggio (−35): una lavagna che sta in un morso si compra intera con un `intervallo` |
-| 200 chiavi, valori da paragrafo | 25 | 88043 | 1 messo, ed era rumore | l'agente ha usato-verificato-scartato la proposta, poi pagato lo scan; OFF (chiavi opache): 13 richieste, 85436 byte, tutto 0 nel parcheggio |
-
-Le risposte sono state 8/8 esatte in ogni corsa, trabocchetto (i cinghiali dell'orto) sempre col silenzio, le confidenza sempre riportate — l'onesta' come API tenuta da modelli piccoli veri. Il verdetto misurato: **il guadagno del prefetcher non scala col numero di chiavi — scala con la distanza tra memoria e contesto e col nome delle chiavi**. Con 3 chiavi parlanti l'apertura e' regalata; a 40 lo scan intero costa quanto due proposte; a 200 chiavi generate con nomi di template (le frags ripetute dell'artigiano di turno) la similarita' sintattica ha proposto solo rumore e la finestra del 64 (le voci in ordine di nascita) ha mancato la meta'. Due dati duri per il futuro dichiarato nel contratto: le chiavi descrittive pagano solo se sono anche SINGOLARI (il rumore di nomi ripetuti cattura la similarita'), e il filo che pagina a 64 voci rende il cliente della lavagna cieco a tutto cio' che nasce dopo la prima pagina.
-
-
-## Il write-ahead log: la memoria che sopravvive al crash (capitolo 13)
-
-Metafora: *il diario di bordo.* La nave può affondare a ogni ondata, ma il diario si scrive riga per riga e ogni riga è inchiostrata prima della successiva: chi lo rilegge ricostruisce il viaggio fino all'ultima riga leggibile. Il dolore, numerato nel banco: ogni `salva` riscrive il file intero (64 ms a 50k chiavi) e fra due salva tutto vive solo in arena — un crash perde tutto dall'ultimo snapshot.
-
-La meccanica è un file append-only accanto al db (`<db>.wal`), il contratto [W1]..[W6] scritto prima del codice in `wal.h`:
-
-- **il log viene prima** [W1]: il layer scrive il record PRIMA di toccare il motore — un crash fra i due ri-applica, il contrario perderebbe la put accettata.
-- **il trittico della durabilità** [W2]: `fwrite + fflush + fsync` per record. Il post mortem del capitolo è nella misura stessa: fsync senza fflush sincronizza un kernel che non ha ancora i byte (vivi nel buffer del processo) — la prima misura diceva 70 µs, quella onesta 216 µs. La decisione sulla politica di durabilità è chiusa dai numeri di `misura_fsync`, non dai gusti: fsync per put (216 µs, invisibile al ritmo dell'agente), group commit escluso perché il suo batch non si riempie MAI a quel ritmo — degenerebbe in "fsync solo a salva", cioè in non-WAL.
-- **il prefisso è sicuro** [W3]: CRC-32 per record (il contratto del capitolo 4): un record rotto ferma il replay lì, si perde solo la coda non ancora inchiostrata — e la coda marcia si **tronca**, perché un record nuovo non deve mai finire dietro una coda che il replay non leggerebbe mai.
-- **il tick sta nel record** [W4]: il replay ricostruisce il `nato` di ogni entry — le TTL rivivono col tempo vero, non col tempo del caricamento. Limite dichiarato: caricare lo snapshot a un tick sopra i record allunga le TTL replayate (il tick nel file PDB1 è formato v2, sta in obitorio).
-- **si taglia dopo lo snapshot, mai prima** [W5]: il WAL vive fra due `salva`; un crash fra snapshot e taglio ri-applica l'ultimo batch (idempotente), il contrario lo perderebbe.
-- **uno scrittore** [W6]: single-thread per contratto, come il motore.
-
-I numeri del banco `demo_wal` (misurati, gate incluso): replay esatto di 212/212 record (200 put + 12 del, di cui uno su chiave mai esistita — legale), 239 vive ricostruite con 199 valori verificati uno a uno; la TTL replayata a tick 1 muore a tick 6 come la viva; 50 byte di coda marcia scartati, dichiarati e troncati; il taglio dopo lo snapshot azzera il segmento e il replay successivo applica solo il batch nuovo. Il prezzo: put nuda p50 0.90 µs contro put inchiostrata p50 212 µs — ratio 236x, e a 200 put il WAL costa 42 ms in tutto: la durabilità non è gratis, e il banco lo dice invece di nasconderlo. Dal filo MCP (`demo_mcp`): la put dopo il salva sopravvive al crash senza alcun salva in mezzo — il gate [W1] attraversa il filo intero.
-
-## La lavagna a un solo custode: la blackboard (capitolo 14)
-
-Metafora: *il palazzo con un solo archivista.* N agenti entrano dalla porta, ognuno col suo sportello; dietro il bancone c'è UNA arena viva, UN solo WAL, UN solo lucchetto. Ciò che l'agente A scrive, l'agente B lo legge senza che nessuno abbia salvato: la lavagna è l'arena viva, il contrario dello snapshot che è la fotografia dei morti.
-
-La strada era segnata dal capitolo 13 e dal campo. Due processi sullo stesso db non erano "non supportati": erano **corruzione silenziosa** — due WAL che si scrivono addosso, nessun lock, nessuno se ne accorge. L'arco è andato a un estremo per volta, ciascuno col suo contratto e il suo commit:
-
-1. **[I11] un db, un solo padrone**: un lucchetto (flock su Linux, LockFile su Windows) sul `<db>.lock` — chi arriva secondo cade ad alta voce col cartellino del pid di chi tiene la porta, invece di scrivere in due sullo stesso file. Il bug silenzioso diventa contratto.
-2. **[I12] lo snapshot è tutto o nulla**: il `fopen("wb")` bruciava mezzo file alla volta — un crash a metà `salva` lasciava un db troncato che la ricostruzione del CRC dichiarava morto alla prima entry spezzata. Ora si scrive su `<nome>.tmp` e si rinomina: il rename è atomico, la finestra è chiusa.
-3. **Il banco prima del gateway** (`demo_multiagente`, [B1]..[B6]): la domanda che decide un mese di lavoro — il guadagno del prefetcher ha una gobba? — misurata prima di costruire il socket. La risposta: **sì**: margine ON-vs-OFF 70.9% nelle sessioni brevi e dense di look-up (il profilo del sub-agente), 38.4% nelle lunghe dove i turni di scrittura pagano handle senza colpire (bilancio del parcheggio: −29, −19). Il verdetto di campo riprodotto deterministicamente: il prefetcher è un ottimizzatore del cold start. La lavagna paga, e paga di più dove il gateway la serve.
-4. **Il gateway** (`gateway.h`/`gateway.c` + `mcp_gateway.c`, [L1]..[L6]): l'architettura di Redis applicata alla memoria di lavoro — un solo processo possiede il motore, N clienti parlano su socket TCP 127.0.0.1 (porta scelta dall'OS) con il **filo del capitolo 11 invariato** (`mcp_gestisci` non cambia di una riga: un cliente MCP esistente si connette e funziona). Il guscio `mcp_stdio.c` resta il guscio-1 (un cliente, stdin/stdout); `mcp_gateway` è il guscio-2.
-
-Il contratto della lavagna, scritto prima del codice:
-
-- **[L1] la lavagna è l'arena viva**: lo stato che un cliente scrive è visibile al prossimo get di un altro cliente, senza salva in mezzo. Conseguenze dichiarate: il WAL è quello del padrone (le put di TUTTI si inchiostrano nel segmento unico [W1]); il salva di uno taglia il segmento per tutti [W5] — la convenzione della memoria resta una: "salva dopo le scritture pesanti", di chiunque siano.
-- **[L2] un solo custode [I11]**: il gateway È il padrone. N clienti non sono N padroni: i clienti non toccano il file.
-- **[L3] il filo è quello del capitolo 11**: JSON-RPC 2.0, un oggetto per riga, stessi metodi.
-- **[L4] nessuno parla nel tempo degli altri**: select a eventi; la riga spezzata resta nel SUO buffer, la risposta non letta nella SUA coda di uscita — il cliente lento consuma la sua coda, non il tempo altrui.
-- **[L5] l'orologio è il giro del custode [I8]**: le richieste di tutti alimentano lo stesso contatore — il TTL di un cliente è accorciato dal traffico degli altri: la lavagna è un bene comune anche nel consumo.
-- **[L6] la porta è stretta**: bind su 127.0.0.1, senza autenticazione — per questo la porta non dà sul mondo.
-
-I numeri del banco `demo_gateway` (gate incluso, processi e socket veri): A scrive e B legge da un altro socket senza salva [L1]; envelope e confidenza attraversano intatti [L3]; righe spezzate e mescolate servite in ordine, la coda di B nell'ordine giusto [L4]; il crash del custode senza salva non perde le penne di NESSUN cliente — il replay del WAL restituisce le put di entrambi [W1]; il secondo gateway cade ad alta voce col cartellino del pid [L2]/[I11]. MISURA della porta: get in-process 4.27 µs contro p50 12.46 µs attraverso il socket (p99 108.88 µs — su MinGW ~96/371 µs): il kernel sta nel mezzo, e il giro a eventi lo serve.
-
-Il post mortem del capitolo ha 40 anni: **Nagle + delayed-ACK** (1984, e il delayed-ACK di Linux): il send da 1 byte del `'\n'` restava nello stomaco del kernel fino a 40 ms — il banco si sarebbe appeso in CI e su Windows il timing benigno lo nascondeva. Cura: `TCP_NODELAY` su socket accettati e cliente (la stessa pillola di Redis), e attese con scadenza nel banco. Obitorio: zero thread (una risposta enorme ritarda le altre — la stessa rinuncia [W6]), zero keepalive in v1, nessuna autenticazione (per questo [L6]).
-
-## Compilare ed eseguire
-
-Serve `gcc` (MinGW su Windows, gcc su Linux) e `make` (su Windows lo porta MSYS2 come `mingw32-make`; a mano: `gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -o motore_demo motore.c demo_motore.c`). Niente dipendenze.
+- **What it is**: an in-process KV engine with TTL as a *contract* (timing wheel, batch O(1) death — expired memory is gone, not down-ranked), range scans, syntactic similarity with **confidence declared on every single answer**, a write-ahead log, and an MCP server with two shells: stdio and a single-owner TCP gateway (N clients, one custode).
+- **What it is NOT**: no SQL, no schema, no embeddings (similarity is syntactic — it catches typos, not synonyms), no replication, no threads, single file. The limits are declared, not discovered in production.
+- **Who it's for**: agent working memory — the profile that writes a lot and queries selectively. A `put` is microseconds and zero LLM calls; extraction-based memory systems (Mem0/Zep-class) pay an LLM round per ingested message instead.
 
 ```bash
-make motore_demo        # il motore + il banco di prova: gate per OGNI invariante
-make mcp_server         # il server MCP su stdio: ./mcp_server [file.db [tick]]
-make demo_mcp           # il banco del layer MCP: gate [M1]..[M11] + MISURA
-make prefetch_hook      # l'hook pre_agent: ./prefetch_hook [file.db]
-make demo_prefetch      # il banco del prefetcher: gate [P1]..[P7], [P9] + MISURA ([P8] vive nel gate [P6], col bilancio)
-make demo_multiagente   # il banco multi-sessione: la gobba del cold start
-make mcp_gateway        # il guscio-2: ./mcp_gateway [file.db [tick]] — la lavagna in ascolto
-make demo_gateway       # il banco della lavagna: gate [L1]..[L6] + MISURA della porta
-make database_quotient  # qualunque capitolo, uno per volta
-./motore_demo           # esce con EXIT!=0 se un contratto salta
+make motore_demo && ./motore_demo   # engine + bench: EXIT!=0 if a contract breaks
+make mcp_server                    # the MCP server over stdio: ./mcp_server [file.db [tick]]
+make demo_mcp                      # the MCP layer bench: gates [M1]..[M11] + MEASUREMENT
 ```
 
-Su Windows: il Device Guard può bloccare le exe appena compilate nella cartella del progetto (exit 126). Attendere qualche secondo e ripetere, o compilare in una directory fuori dai criteri.
+You need `gcc` and `make` (on Windows: MinGW + `mingw32-make`). Any chapter also builds alone: `make database_quotient`.
 
-Il push è protetto dalla CI: a ogni push un job ubuntu+gcc ricompila ogni capitolo e **lo fa girare come banco di prova** — un contratto che salta rende rosso il badge in testa al README. Le prime due prede della CI: il porting Linux (quattro capitoli compilavano solo su MinGW perché il ramo non-Windows usava `struct timespec` e `clock_gettime` senza includere `<time.h>`; e anche includendolo, con `-std=c11` stretto la glibc non dichiara `clock_gettime` senza `_POSIX_C_SOURCE`) e il link di `pow()`: su Linux vive in libm, che MinGW piega dentro il runtime — ecco perché in locale linkava. Ora Makefile: `_POSIX_C_SOURCE` nei CFLAGS, `-lm` negli LDLIBS.
+## Measured, not promised
 
-## I numeri del motore (misurati, non promessi)
+| what | the number | proven by |
+|---|---|---|
+| exact get | p50 2.1 µs / p99 2.3 µs over the MCP wire (0.10 µs in-process) | `demo_mcp`, every CI run |
+| fuzzy query (one-digit typos) | p50 9.5 µs, truth in the top-8 at 88% | `demo_mcp` |
+| batch presence, 64 keys | p50 15 µs, zero false negatives | `demo_mcp` |
+| TTL death | 20,000 expiries in the same tick in 0.1 ms, **without reading a key** | `motore_demo` |
+| durable put (WAL) | p50 216 µs vs 0.90 µs naked — a 236× ratio, declared not hidden | `prove/misura_fsync.c` |
+| crash replay | 212/212 records exact, rotten tail truncated | `demo_wal` |
+| across the gateway door | in-process 4.27 µs → p50 12.46 µs over TCP (the kernel sits in the middle) | `demo_gateway` |
+| cold start with the prefetcher | hit-rate 1.00 with 3 talking keys (+81 bytes); a tie at 40; noise at 200 — the hump is published, not promised | `demo_multiagente`, real GLM-agent runs |
 
-- 50000 chiavi vive su disco (2.46 MB): compattazione con ordinamento 64 ms, ricarica con ricostruzione di semantica, porte e anello 64 ms, 0 sbagliate su 60000 verifiche.
-- Intervallo `u0002500..u0003499`: 833 corrispondenze == 833 del conteggio indipendente, in 865 passi; il merge con la coda regge su tre conti.
-- Get esatti: p50 0.100 µs; porta Bloom: 99.22% degli alieni risolti senza toccare lo slot.
-- Refusi di una cifra: 99.9% di risposte dichiarate, verità nel top-8 al 94.2%, gruppo dei pari-merito 4.9 (l'ambiguità è del refuso, e il db la dichiara invece di fingere).
-- 20000 scadenze nello stesso tick: gestite in 0.1 ms **senza leggere una chiave**.
+The economics in one line: an LLM round-trip costs 10²..10³ ms of generation; the engine answers under the millisecond at p99 — so the cost of any task is **the round**, and the layer is built to pay as few as possible (one `chiedi` returns key AND value AND confidence; `intervallo` returns the batch plus the total).
 
-## Le lezioni di metodo
+Positioning, stated honestly: this is not the extraction plane of Mem0/Zep/Letta — it is **the storage plane below them**. The fair comparison is Redis as a backend, for embedded/edge memory where one LLM call per `add()` is unacceptable. The full study — use cases, field numbers, feature-by-feature comparison with the memory-server market — is [`studio-utilita.md`](studio-utilita.md) (Italian only).
 
-Questo repo è anche un diario di come si impara a costruire cose che non si sanno ancora costruire; capitolo per capitolo:
-
-- **Prima misurare, poi credere.** Ogni tecnica arriva con il suo numero confrontato con la teoria (Bloom: 0.777% vs 0.82%; banding: cattura prevista vs top-k misurato).
-- **Stampare non è bloccare.** Un test che stampa gli errori senza far fallire il processo non è un test: questa lezione costa due capitoli di fila nel post mortem.
-- **Confronto senza soglia non è gate.** Il passaggio da "0 == 0, verde!" a "470/500" è il cuore del post mortem del motore.
-- **Invariants-first.** Il contratto scritto prima del codice sposta la cattura dei bug a sinistra (nel design). Nel decimo capitolo: 8 trappole catturate a tavolino, 1 al primo run. Nel motore: il bug vero l'ha trovato un warning `-Wall` prima ancora del run.
-- **L'onestà è un'API.** Confidenze dichiarate, silenzio invece dell'invenzione, "forse" del Bloom distinto dal "no" del probe.
-
-## Struttura
+## The product
 
 ```
-didattica/database*.c  # il PERCORSO EDUCATIVO (chiuso): il fossile + i nove
-                       # capitoli, ognuno si compila da solo — documentazione
-motore.h / motore.c    # IL PRODOTTO, da qui in giu': l'engine unico (API pubblica, handle opaco)
-prove/demo_motore.c     # il banco di prova: gate a ogni invariante
-json.h / json.c        # il parser JSON minimale: una fonte di verita' per il filo
-mcp_server.h / mcp_server.c  # il nucleo MCP: 10 tool, contratto [M1]..[M11]
-mcp_stdio.c            # il guscio sottile: stdin/stdout, un oggetto per riga
-prove/demo_mcp.c        # il banco del layer: gate e MISURA (latenze, token)
-prefetch.h / prefetch.c      # il prefetcher speculativo: contratto [P1]..[P9]
-prefetch_hook.c        # l'hook pre_agent: traccia -> predizione -> staging
-prove/demo_prefetch.c   # il banco del prefetcher: gate e MISURA (hit-rate, bilancio)
-wal.h / wal.c          # il write-ahead log: contratto [W1]..[W6], il replay esatto
-prove/demo_wal.c        # il banco del WAL: crash simulati, coda marcia, taglio
-prove/misura_fsync.c    # la MISURA che ha chiuso la decisione sulla durabilita'
-prove/demo_multiagente.c # il banco multi-sessione: la gobba del cold start, [B1]..[B6]
-gateway.h / gateway.c  # il gateway: la lavagna a un solo custode, [L1]..[L6]
-mcp_gateway.c           # il guscio-2: la porta TCP su 127.0.0.1
-prove/demo_gateway.c    # il banco della lavagna: processi veri, socket veri, MISURA della porta
-studio-utilita.md       # lo studio d'utilita': quando serve, quanto aiuta, il confronto col mercato
-.vibe/hooks.toml       # l'hook montato: pre_agent, fail-open
-Makefile               # make motore_demo | make mcp_server | make <capitolo>
-.gitignore             # eseguibili e file di prova non entrano nel repo
+motore.h / motore.c              the engine: public API, opaque handle, written contract
+wal.h / wal.c                    the write-ahead log: [W1]..[W6], exact replay
+json.h / json.c                  the minimal JSON parser: one source of truth for the wire
+mcp_server.h / mcp_server.c      the MCP core: 10 tools, contract [M1]..[M11]
+mcp_stdio.c                      shell-1: stdin/stdout, one JSON object per line
+prefetch.h / prefetch.c          the speculative prefetcher: [P1]..[P10]
+prefetch_hook.c                  the pre_agent hook: reads the agent's reasoning trace,
+                                 predicts up to 4 keys, stages them with a TTL
+gateway.h / gateway.c            the blackboard: one custode [I11], N clients, [L1]..[L6]
+mcp_gateway.c                    shell-2: the TCP door on 127.0.0.1
+prove/                           the benches: a numbered gate per invariant, + MEASUREMENTs
+didattica/                       the educational path (closed) + the full story, in Italian
 ```
 
-## Dove proseguire
+Signature contract lines:
 
-Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. La concorrenza "a un estremo per volta" è arrivata col capitolo 14 (lucchetto, snapshot atomico, gateway) — ma dichiarata nei suoi limiti, non promessa: zero thread, zero keepalive, nessuna autenticazione. I passi naturali dopo: il banco **vivente** — agenti LLM veri (piccoli, effort basso) che si parlano addosso attraverso la lavagna, e il passamano speculative del prefetcher fra traccia di uno e get di un altro; poi il tick dentro il file PDB1 (formato v2, per le TTL replayate a orologio mobile) e iteratori stabili.
+- **[I7] every live entry IS the current version of its key** — every death (delete, expiry, supersede) marks and counts at the same instant.
+- **[I11] one db, one owner** — the second process to open the same file falls loudly, never two silent writers on one WAL.
+- **Honesty as an API**: exact hit → confidence 1.0; fuzzy → the value with a declared similarity; nothing → silence; the Bloom filter's "maybe" is distinct from the index's "no". The audit tool makes a broken contract visible to the agent too.
+- **The clock belongs to the caller [I8]**: no wall-clock time inside the engine's decisions.
+- **The speculative prefetcher (chapter 12)**: a hook watches the agent's reasoning trace and stages the keys it will likely need — with built-in forgetting (the wrong predictions die on their own in the TTL) and a measured byte balance. The gain is a cold-start hump, and the disproof is published with the same font as the proof.
 
-## Licenza
+Every gate above runs in CI on every push, with `-Werror` and ASan+UBSan: a broken contract turns the badge red. The contracts were written before the code — the full list with post mortems is in [didattica/README.md](didattica/README.md).
 
-MIT — vedi [LICENSE](LICENSE).
+## The chapters (the educational path, in [didattica/](didattica/))
+
+Each builds alone, each is a bench. The metaphors that generated them — and every post mortem — are in [didattica/README.md](didattica/README.md).
+
+| # | the real world calls it | file |
+|---|---|---|
+| 0 | the fossil: the original code, untouched, with its didactic bugs | `didattica/database.c` |
+| 2 | **Bitcask** (append-only log + hash in RAM) | `didattica/database_indexed.c` |
+| 3 | the LSM **merge** | `didattica/database_compact.c` |
+| 4 | checksum + snapshot (SQLite, RocksDB) | `didattica/database_persist.c` |
+| 5 | **learned index** (Kraska 2017) | `didattica/database_learned.c` |
+| 6 | **MinHash/LSH banding** (Broder 1997) | `didattica/database_semantic.c` |
+| 7 | **timing wheel** (Linux kernel) | `didattica/database_ring.c` |
+| 8 | **Bloom 1970 / quotient filter** (Bender 2012) | `didattica/database_quotient.c` |
+| 9 | the fusion: the invariants-first experiment | `didattica/database_persist_semantic.c` |
+| 11 | **MCP** — the engine as an agent tool (capitoli 11-14 in the story) | `mcp_server.c` |
+
+## Where to read more
+
+- [didattica/README.md](didattica/README.md) (Italian) — the full story: the human-AI collaboration, metaphors translated into mechanics, every chapter's post mortem, the living-bench runs with real small agents on the blackboard.
+- [studio-utilita.md](studio-utilita.md) (Italian) — the utility study: when this helps, how much (field numbers), how original it is, and the honest comparison with the memory-server market.
+- [AGENTS.md](AGENTS.md) — the collaboration method this repo runs on, reusable elsewhere.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
