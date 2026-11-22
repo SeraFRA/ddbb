@@ -208,21 +208,21 @@ Questo repo è anche un diario di come si impara a costruire cose che non si san
 didattica/database*.c  # il PERCORSO EDUCATIVO (chiuso): il fossile + i nove
                        # capitoli, ognuno si compila da solo — documentazione
 motore.h / motore.c    # IL PRODOTTO, da qui in giu': l'engine unico (API pubblica, handle opaco)
-demo_motore.c          # il banco di prova: gate a ogni invariante
+prove/demo_motore.c     # il banco di prova: gate a ogni invariante
 json.h / json.c        # il parser JSON minimale: una fonte di verita' per il filo
 mcp_server.h / mcp_server.c  # il nucleo MCP: 10 tool, contratto [M1]..[M11]
 mcp_stdio.c            # il guscio sottile: stdin/stdout, un oggetto per riga
-demo_mcp.c             # il banco del layer: gate e MISURA (latenze, token)
+prove/demo_mcp.c        # il banco del layer: gate e MISURA (latenze, token)
 prefetch.h / prefetch.c      # il prefetcher speculativo: contratto [P1]..[P9]
 prefetch_hook.c        # l'hook pre_agent: traccia -> predizione -> staging
-demo_prefetch.c        # il banco del prefetcher: gate e MISURA (hit-rate, bilancio)
+prove/demo_prefetch.c   # il banco del prefetcher: gate e MISURA (hit-rate, bilancio)
 wal.h / wal.c          # il write-ahead log: contratto [W1]..[W6], il replay esatto
-demo_wal.c             # il banco del WAL: crash simulati, coda marcia, taglio
-misura_fsync.c          # la MISURA che ha chiuso la decisione sulla durabilita'
-demo_multiagente.c      # il banco multi-sessione: la gobba del cold start, [B1]..[B6]
+prove/demo_wal.c        # il banco del WAL: crash simulati, coda marcia, taglio
+prove/misura_fsync.c    # la MISURA che ha chiuso la decisione sulla durabilita'
+prove/demo_multiagente.c # il banco multi-sessione: la gobba del cold start, [B1]..[B6]
 gateway.h / gateway.c  # il gateway: la lavagna a un solo custode, [L1]..[L6]
 mcp_gateway.c           # il guscio-2: la porta TCP su 127.0.0.1
-demo_gateway.c          # il banco della lavagna: processi veri, socket veri, MISURA della porta
+prove/demo_gateway.c    # il banco della lavagna: processi veri, socket veri, MISURA della porta
 studio-utilita.md       # lo studio d'utilita': quando serve, quanto aiuta, il confronto col mercato
 .vibe/hooks.toml       # l'hook montato: pre_agent, fail-open
 Makefile               # make motore_demo | make mcp_server | make <capitolo>

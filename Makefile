@@ -6,23 +6,24 @@ CC      = gcc
 # (e la struct timespec resta pratica ideale); il define lo riporta alla
 # luce su Linux senza cambiare niente su MinGW, dove l'orologio passa
 # da windows.h.
-CFLAGS  = -Wall -Wextra -Wpedantic -std=c11 -O2 -D_POSIX_C_SOURCE=199309L
+CFLAGS  = -Wall -Wextra -Wpedantic -std=c11 -O2 -D_POSIX_C_SOURCE=199309L -I.
+# -I.: i banchi sono in prove/ e includono le teste del prodotto in radice
 # LDLIBS: su Linux pow/exp vivono in libm, che MinGW piega dentro il
 # runtime (per questo in locale linkava anche senza: la scoperta della
 # CI al primo giro). -lm su MinGW e' un no-op innocuo.
 LDLIBS  = -lm
 
 # il motore
-motore_demo: motore.c demo_motore.c motore.h
-	$(CC) $(CFLAGS) -o $@ motore.c demo_motore.c $(LDLIBS)
+motore_demo: motore.c prove/demo_motore.c motore.h
+	$(CC) $(CFLAGS) -o $@ motore.c prove/demo_motore.c $(LDLIBS)
 
 # il layer MCP (capitolo 11): nucleo + guscio stdio + banco di prova;
 # dal capitolo 13 il layer porta il WAL (la durabilita' fra due salva)
 mcp_server: mcp_stdio.c mcp_server.c json.c motore.c prefetch.c wal.c mcp_server.h json.h motore.h prefetch.h wal.h
 	$(CC) $(CFLAGS) -o $@ mcp_stdio.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS)
 
-demo_mcp: demo_mcp.c mcp_server.c json.c motore.c prefetch.c wal.c mcp_server.h json.h motore.h prefetch.h wal.h
-	$(CC) $(CFLAGS) -o $@ demo_mcp.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS)
+demo_mcp: prove/demo_mcp.c mcp_server.c json.c motore.c prefetch.c wal.c mcp_server.h json.h motore.h prefetch.h wal.h
+	$(CC) $(CFLAGS) -o $@ prove/demo_mcp.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS)
 
 # il prefetcher speculativo (capitolo 12): l'hook pre_agent + il banco.
 # gateway.c entra per il modo CLIENTE della lavagna [P10]: il lato
@@ -31,13 +32,13 @@ demo_mcp: demo_mcp.c mcp_server.c json.c motore.c prefetch.c wal.c mcp_server.h 
 prefetch_hook: prefetch_hook.c prefetch.c gateway_cliente.c json.c motore.c prefetch.h gateway.h json.h motore.h
 	$(CC) $(CFLAGS) -o $@ prefetch_hook.c prefetch.c gateway_cliente.c json.c motore.c $(LDLIBS) $(LIBS_PORTA)
 
-demo_prefetch: demo_prefetch.c prefetch.c json.c motore.c mcp_server.c wal.c prefetch.h json.h motore.h mcp_server.h wal.h
-	$(CC) $(CFLAGS) -o $@ demo_prefetch.c prefetch.c json.c motore.c mcp_server.c wal.c $(LDLIBS)
+demo_prefetch: prove/demo_prefetch.c prefetch.c json.c motore.c mcp_server.c wal.c prefetch.h json.h motore.h mcp_server.h wal.h
+	$(CC) $(CFLAGS) -o $@ prove/demo_prefetch.c prefetch.c json.c motore.c mcp_server.c wal.c $(LDLIBS)
 
 # il banco multi-sessione (la gobba del cold start): N sessioni corte e
 # lunghe, prefetch on/off, il gate che decide se il gateway vale un mese
-demo_multiagente: demo_multiagente.c prefetch.c json.c motore.c mcp_server.c wal.c prefetch.h json.h motore.h mcp_server.h wal.h
-	$(CC) $(CFLAGS) -o $@ demo_multiagente.c prefetch.c json.c motore.c mcp_server.c wal.c $(LDLIBS)
+demo_multiagente: prove/demo_multiagente.c prefetch.c json.c motore.c mcp_server.c wal.c prefetch.h json.h motore.h mcp_server.h wal.h
+	$(CC) $(CFLAGS) -o $@ prove/demo_multiagente.c prefetch.c json.c motore.c mcp_server.c wal.c $(LDLIBS)
 
 # la porta si paga solo su Windows (ws2_32): su Linux il kernel la regala
 ifeq ($(OS),Windows_NT)
@@ -50,17 +51,17 @@ endif
 mcp_gateway: mcp_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c gateway.h mcp_server.h json.h motore.h prefetch.h wal.h
 	$(CC) $(CFLAGS) -o $@ mcp_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS) $(LIBS_PORTA)
 
-demo_gateway: demo_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c gateway.h mcp_server.h json.h motore.h prefetch.h wal.h
-	$(CC) $(CFLAGS) -o $@ demo_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS) $(LIBS_PORTA)
+demo_gateway: prove/demo_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c gateway.h mcp_server.h json.h motore.h prefetch.h wal.h
+	$(CC) $(CFLAGS) -o $@ prove/demo_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c $(LDLIBS) $(LIBS_PORTA)
 
 # il write-ahead log (capitolo 13): il log + il banco; misura_fsync e'
 # la misura che ha chiuso la decisione sulla durabilita' (prima il
 # numero, poi il codice)
-demo_wal: demo_wal.c wal.c motore.c wal.h motore.h
-	$(CC) $(CFLAGS) -o $@ demo_wal.c wal.c motore.c $(LDLIBS)
+demo_wal: prove/demo_wal.c wal.c motore.c wal.h motore.h
+	$(CC) $(CFLAGS) -o $@ prove/demo_wal.c wal.c motore.c $(LDLIBS)
 
-misura_fsync: misura_fsync.c
-	$(CC) $(CFLAGS) -o $@ misura_fsync.c $(LDLIBS)
+misura_fsync: prove/misura_fsync.c
+	$(CC) $(CFLAGS) -o $@ prove/misura_fsync.c $(LDLIBS)
 
 # i capitoli storici sono passati in didattica/: continuano a
 # compilarsi UNO PER VOLTA, dal loro scaffale — il target non cambia

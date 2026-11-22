@@ -207,21 +207,21 @@ This repo is also a diary of how one learns to build things one does not know ho
 didattica/database*.c  # the EDUCATIONAL PATH (closed): the fossil + the nine
                        # chapters, each builds alone — documentation
 motore.h / motore.c    # THE PRODUCT, from here down: the single engine (public API, opaque handle)
-demo_motore.c          # the test bench: a gate per invariant
+prove/demo_motore.c     # the test bench: a gate per invariant
 json.h / json.c        # the minimal JSON parser: one source of truth for the wire
 mcp_server.h / mcp_server.c  # the MCP core: 10 tools, contract [M1]..[M11]
 mcp_stdio.c            # the thin shell: stdin/stdout, one object per line
-demo_mcp.c             # the layer's bench: gates and MEASUREMENT (latency, tokens)
+prove/demo_mcp.c        # the layer's bench: gates and MEASUREMENT (latency, tokens)
 prefetch.h / prefetch.c      # the speculative prefetcher: contract [P1]..[P9]
 prefetch_hook.c        # the pre_agent hook: trace -> prediction -> staging
-demo_prefetch.c        # the prefetcher bench: gates and MEASUREMENT (hit-rate, balance)
+prove/demo_prefetch.c   # the prefetcher bench: gates and MEASUREMENT (hit-rate, balance)
 wal.h / wal.c          # the write-ahead log: contract [W1]..[W6], the exact replay
-demo_wal.c             # the WAL bench: simulated crashes, rotten tail, the cut
-misura_fsync.c          # the MEASUREMENT that closed the durability decision
-demo_multiagente.c      # the multi-session bench: the cold-start hump, [B1]..[B6]
+prove/demo_wal.c        # the WAL bench: simulated crashes, rotten tail, the cut
+prove/misura_fsync.c    # the MEASUREMENT that closed the durability decision
+prove/demo_multiagente.c # the multi-session bench: the cold-start hump, [B1]..[B6]
 gateway.h / gateway.c  # the gateway: the single-custode blackboard, [L1]..[L6]
 mcp_gateway.c           # shell-2: the TCP door on 127.0.0.1
-demo_gateway.c          # the blackboard bench: real processes, real sockets, door MEASUREMENT
+prove/demo_gateway.c    # the blackboard bench: real processes, real sockets, door MEASUREMENT
 studio-utilita.md       # the utility study: when it helps, how much, the market comparison (Italian only)
 .vibe/hooks.toml       # the hook mounted: pre_agent, fail-open
 Makefile               # make motore_demo | make mcp_server | make <chapter>

@@ -1,4 +1,3 @@
-# CI: il repo si verifica da solo a ogni push.
 # Tre livelli: il fossile compila (i suoi bug sono didattici), il corpus
 # compila PULITO (-Werror: un warning e' un bug latente, non letteratura),
 # e il motore corre sotto ASan+UBSan (offset grezzi per costruzione:
@@ -21,7 +20,7 @@ jobs:
 
       - name: compila TUTTO con -Werror
         run: >
-          make CFLAGS="-Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -Werror"
+          make CFLAGS="-Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -Werror -I."
           LDLIBS="-lm"
           database_debug database_indexed database_compact
           database_persist database_learned database_semantic
@@ -39,46 +38,46 @@ jobs:
       - name: collaudo del motore (ASan + UBSan + iniezione del guasto)
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
-              -DMOTORE_COLLAUDO \
-              -fsanitize=address,undefined -fno-sanitize-recover=all \
-              -o motore_asan motore.c demo_motore.c -lm
+              -DMOTORE_COLLAUDO -I. \
+              -fsanitize=address,undefined -fno-sanitize-recover=all -I. \
+              -o motore_asan motore.c prove/demo_motore.c -lm
           ./motore_asan
 
       - name: collaudo del layer MCP (ASan + UBSan, con la put rifiutata iniettata)
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
-              -DMOTORE_COLLAUDO \
-              -fsanitize=address,undefined -fno-sanitize-recover=all \
-              -o mcp_asan demo_mcp.c mcp_server.c json.c motore.c prefetch.c wal.c -lm
+              -DMOTORE_COLLAUDO -I. \
+              -fsanitize=address,undefined -fno-sanitize-recover=all -I. \
+              -o mcp_asan prove/demo_mcp.c mcp_server.c json.c motore.c prefetch.c wal.c -lm
           ./mcp_asan
 
       - name: collaudo del WAL (ASan + UBSan, con la put monca iniettata)
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
-              -DWAL_COLLAUDO \
-              -fsanitize=address,undefined -fno-sanitize-recover=all \
-              -o wal_asan demo_wal.c wal.c motore.c -lm
+              -DWAL_COLLAUDO -I. \
+              -fsanitize=address,undefined -fno-sanitize-recover=all -I. \
+              -o wal_asan prove/demo_wal.c wal.c motore.c -lm
           ./wal_asan
 
       - name: collaudo del prefetcher speculativo (ASan + UBSan)
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
-              -fsanitize=address,undefined -fno-sanitize-recover=all \
-              -o prefetch_asan demo_prefetch.c prefetch.c mcp_server.c json.c motore.c wal.c -lm
+              -fsanitize=address,undefined -fno-sanitize-recover=all -I. \
+              -o prefetch_asan prove/demo_prefetch.c prefetch.c mcp_server.c json.c motore.c wal.c -lm
           ./prefetch_asan
 
       - name: collaudo del banco multi-sessione (ASan + UBSan)
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
-              -fsanitize=address,undefined -fno-sanitize-recover=all \
-              -o multiagente_asan demo_multiagente.c prefetch.c mcp_server.c json.c motore.c wal.c -lm
+              -fsanitize=address,undefined -fno-sanitize-recover=all -I. \
+              -o multiagente_asan prove/demo_multiagente.c prefetch.c mcp_server.c json.c motore.c wal.c -lm
           ./multiagente_asan
 
       - name: collaudo del gateway (ASan + UBSan)
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
-              -fsanitize=address,undefined -fno-sanitize-recover=all \
-              -o gateway_asan demo_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c -lm
+              -fsanitize=address,undefined -fno-sanitize-recover=all -I. \
+              -o gateway_asan prove/demo_gateway.c gateway.c gateway_cliente.c mcp_server.c json.c motore.c prefetch.c wal.c -lm
           ./gateway_asan
 
       - name: "la lavagna vera: gateway vivo, cliente di bash, secondo gateway rifiutato"

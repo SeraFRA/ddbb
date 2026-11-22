@@ -72,7 +72,7 @@ Per l'AI che ci lavora e per l'umano che la guida. Nasce da dieci capitoli
   si toccano.
 - I `didattica/database_*.c` sono il **corpus storico** (la cartella è il
   percorso educativo, separato dal prodotto): non si riscrivono; il
-  lavoro nuovo va nel motore (`motore.h` + `motore.c` + `demo_motore.c`).
+  lavoro nuovo va nel motore (`motore.h` + `motore.c` + `prove/demo_motore.c`).
 - Build: `make` su Linux, `mingw32-make` su Windows/MSYS2. Banco di prova:
   `./motore_demo` (e ogni capitolo gira da sé, gate incluso). La CI
   ricompila e fa correre tutto a ogni push — con `-Werror` (un warning
