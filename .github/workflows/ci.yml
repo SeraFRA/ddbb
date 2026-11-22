@@ -87,6 +87,7 @@ jobs:
           printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"salva","arguments":{"nome":"lav_ci.db"}}}\n' | ./mcp_server > /dev/null
           ./mcp_gateway lav_ci.db > /tmp/gw.log 2>&1 &
           GWPID=$!
+          trap 'kill $GWPID 2>/dev/null || true' EXIT
           for i in $(seq 1 30); do
             PORTA=$(sed -n 's/gateway: 127.0.0.1:\([0-9]*\) .*/\1/p' /tmp/gw.log)
             [ -n "$PORTA" ] && break
@@ -106,14 +107,14 @@ jobs:
       - name: l'hook pre_agent predice, parcheggia e inietta (filo intero)
         run: |
           printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"put","arguments":{"chiave":"nota/grammi-posizionali","valore":"i grammi del motore sono posizionali: pos entra nell hash, quindi chiedi e un fuzzy-prefix, non una ricerca per tema"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"salva","arguments":{"nome":"ci_memoria.db"}}}\n' | ./mcp_server > /dev/null
-          printf '{"turn_id":"ci-1","prompt":"ricordami il post mortem dei grammi posizionali del motore"}' | ./prefetch_hook ci_memoria.db > hook_out.txt
+          printf '{"turn_id":"ci-1","prompt":"ricordami il post mortem dei grammi posizionali del motore"}' | timeout 15 ./prefetch_hook ci_memoria.db > hook_out.txt
           grep -q 'hook_specific_output' hook_out.txt
           grep -q 'nota/grammi-posizionali' hook_out.txt
           grep -q '"gen"' ci_memoria.db.prefetch
 
       - name: il server MCP risponde su stdio
         run: |
-          printf '{"jsonrpc":"2.0","id":1,"method":"ping"}\n' | ./mcp_server > risp.txt
+          printf '{"jsonrpc":"2.0","id":1,"method":"ping"}\n' | timeout 15 ./mcp_server > risp.txt
           grep -q '"result":{}' risp.txt
 
       - name: '[I11] due server veri sullo stesso db: il secondo esce ad alta voce'

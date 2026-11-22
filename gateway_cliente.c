@@ -184,8 +184,18 @@ int gateway_cliente_leggi(gateway_cliente_t *c, char *riga, size_t cap)
             if (c->buf[p] != '\n')
                 continue;
             size_t l = p - c->off;
-            if (l + 1 > cap)
-                return -1;              /* la riga oltre il cap       */
+            if (l + 1 > cap) {
+                /* POST MORTEM (gialli della review, 22-11): il -1
+                 * tornava SENZA avanzare il cursore, e la stessa riga
+                 * gigante restava li' per sempre: errore permanente.
+                 * La riga oltre il cap si BUTTA (il cursore scavalca
+                 * il suo newline) e lo si dichiara una volta sola;
+                 * il filo riprende dalla riga dopo.               */
+                c->off = p + 1;
+                if (c->off == c->len)
+                    c->off = c->len = 0;
+                return -1;
+            }
             if (l > 0 && c->buf[p - 1] == '\r')
                 l--;
             memcpy(riga, c->buf + c->off, l);

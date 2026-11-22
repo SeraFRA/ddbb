@@ -407,6 +407,14 @@ mcp_t *mcp_apri(const char *percorso_db, uint32_t adesso, size_t *scartate)
                                   sizeof s->staging);
         s->pf = prefetch_parcheggio_apri(PREFETCH_PARCHEGGIO_MAX,
                                          PREFETCH_TTL_RICHIESTE);
+        if (!s->pf)
+            /* fail-open e' il contratto, il silenzio no (gialli della
+             * review): chi apre il db merita di sapere che le proposte
+             * non ci sono, e perche' */
+            fprintf(stderr, "[mcp] parcheggio del prefetch assente"
+                            " (memoria?): le proposte tacciono, il"
+                            " il resto serve — fall-open dichiarato,"
+                            " non taciuto\n");
     } else {
         s->mo = motore_apri();
         if (!s->mo) {
@@ -494,8 +502,14 @@ static int tool_put(mcp_t *s, const jval_t *arg, jbuf_t *out)
     double ttl = json_num(json_get(arg, "ttl"), &valido);
     if (!valido)
         ttl = 0;
-    if (ttl < 0 || ttl > 4294967295.0) {
-        payload_errore(out, -32602, "ttl fuori range (0..4294967295)");
+    /* la disciplina dell'avanza, replicata (gialli della review, 22-11):
+     * NaN supera le due disuguaglianze di range — lo cattura il
+     * !(...&&...) negato; e le frazioni si buttano prima del cast,
+     * perche' (uint32_t)NaN e' UB puro e il trunc silenzioso e' una
+     * bugia gentile. */
+    if (!(ttl >= 0 && ttl <= 4294967295.0) || ttl != (uint32_t)ttl) {
+        payload_errore(out, -32602,
+                       "ttl fuori range (intero 0..4294967295)");
         return 1;
     }
     /* la finestra dell'anello si verifica PRIMA dell'inchiostro: il WAL
@@ -578,6 +592,16 @@ static int tool_chiedi(mcp_t *s, const jval_t *arg, jbuf_t *out)
     }
     int valido = 0;
     double kd = json_num(json_get(arg, "k"), &valido);
+    /* gialli della review: NaN e compagnie passavano i confronti e
+     * finivano nel cast (UB); le frazioni si troncavano in silenzio.
+     * Assente = il default; presente e sporco = rifiutato ad alta
+     * voce. Il tetto 1e15 protegge il cast a size_t oltre 2^53, dove
+     * il double non distingue piu' gli interi. */
+    if (valido && (!(kd >= 0 && kd <= 1e15) || kd != (uint64_t)kd)) {
+        payload_errore(out, -32602,
+                       "k non valido (intero 0..1000000000000000)");
+        return 1;
+    }
     size_t k = valido ? (size_t)kd : CHIEDI_K_MAX;
     if (k < 1)
         k = 1;
@@ -606,6 +630,12 @@ static int tool_intervallo(mcp_t *s, const jval_t *arg, jbuf_t *out)
     }
     int valido = 0;
     double kd = json_num(json_get(arg, "k"), &valido);
+    /* la stessa disciplina del k di chiedi (gialli della review)      */
+    if (valido && (!(kd >= 0 && kd <= 1e15) || kd != (uint64_t)kd)) {
+        payload_errore(out, -32602,
+                       "k non valido (intero 0..1000000000000000)");
+        return 1;
+    }
     size_t k = valido ? (size_t)kd : INTERVALLO_K_MAX / 2;
     if (k < 1)
         k = 1;
@@ -822,7 +852,8 @@ typedef struct {
 
 static const tool_t CATALOGO[] = {
 { "put",
-  "Scrive una coppia chiave/valore, con TTL opzionale in tick. Il TTL e' "
+  "Scrive una coppia chiave/valore, con TTL opzionale in tick (INTERO; "
+  "le frazioni e i non-numeri si rifiutano). Il TTL e' "
   "inclusivo: la entry nata a t con TTL T e' morta quando adesso >= t + T; "
   "0 = per sempre. Sovrascrive la chiave esistente. Oltre 4096 tick il TTL "
   "viene rifiutato (e' la finestra dell'anello di scadenze).",
@@ -1043,11 +1074,19 @@ int mcp_gestisci(mcp_t *s, const char *richiesta, size_t len,
                 risposta_errore(&b, id, -32602, "tool sconosciuto");
             } else {
                 jbuf_t payload;
-                jbuf_init(&payload);
-                int is_error = t->gira(s, args, &payload);
-                scrivi_result_tool(&b, id, payload.p, payload.n, is_error);
-                s->byte_payload += payload.n;
-                jbuf_libera(&payload);
+                /* gialli della review: l'init non si controllava e un
+                 * malloc caduto toccava la struct morta a mani nude */
+                if (jbuf_init(&payload) != 0) {
+                    risposta_errore(&b, id, -32603,
+                                   "memoria: il tool non ha potuto"
+                                   " nemmeno cominciare");
+                } else {
+                    int is_error = t->gira(s, args, &payload);
+                    scrivi_result_tool(&b, id, payload.p, payload.n,
+                                       is_error);
+                    s->byte_payload += payload.n;
+                    jbuf_libera(&payload);
+                }
             }
         } else {
             risposta_errore(&b, id, -32601, "method sconosciuto");

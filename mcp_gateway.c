@@ -61,14 +61,24 @@ int main(int argc, char **argv)
     /* il file-porta, derivato del db: l'hook cliente della lavagna
      * [P10] lo legge per sapere dove bussare. Se non si scrive, non
      * e' fatale: e' solo una lavagna che i clienti trovano alla
-     * cieca [L6]. Stale-port dichiarata in gateway.h. */
+     * cieca [L6]. Stale-port dichiarata in gateway.h.
+     * Gialli della review: si scriveva direttamente — l'hook che lo
+     * leggeva a cavallo del fopen("w") vedeva il file vuoto per un
+     * istante. Mossa sola come il salva del motore [I12]: prima la
+     * tmp, poi il rename, e il lettore vede il vecchio o il nuovo. */
     if (argc >= 2) {
-        char pporta[1024];
+        char pporta[1024], ptmp[1032];
         gateway_percorso_porta(argv[1], pporta, sizeof pporta);
-        FILE *fp = fopen(pporta, "w");
+        snprintf(ptmp, sizeof ptmp, "%s.tmp", pporta);
+        FILE *fp = fopen(ptmp, "w");
         if (fp) {
             fprintf(fp, "%u\n", porta);
             fclose(fp);
+            if (rename(ptmp, pporta) != 0) {
+                remove(ptmp);           /* la tmp orfana non vive       */
+                fprintf(stderr, "[gateway] il file-porta %s non si"
+                                " sostituisce\n", pporta);
+            }
         } else {
             fprintf(stderr, "[gateway] il file-porta %s non si scrive\n",
                     pporta);

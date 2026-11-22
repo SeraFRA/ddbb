@@ -508,6 +508,70 @@ int main(void)
         json_libera(p);
     }
 
+    /* ---- [M10] i numeri sporchi si rifiutano, non si troncano
+     * (gialli della review: il NaN passava i range e moriva nel cast,
+     * le frazioni si troncavano in silenzio) */
+    printf("[M10] ttl e k sporchi: rifiutati ad alta voce...\n");
+    {
+        static const struct { const char *nome; const char *args; } casi[] = {
+            { "put",
+              "{\"chiave\":\"sporca\",\"valore\":\"v\",\"ttl\":2.5}" },
+            { "put",
+              "{\"chiave\":\"sporca\",\"valore\":\"v\",\"ttl\":-1}" },
+            { "put",
+              "{\"chiave\":\"sporca\",\"valore\":\"v\",\"ttl\":1e999}" },
+            { "chiedi",
+              "{\"query\":\"sporca\",\"k\":2.5}" },
+            { "chiedi",
+              "{\"query\":\"sporca\",\"k\":-2}" },
+            { "intervallo",
+              "{\"da\":\"a\",\"a\":\"z\",\"k\":1.5}" },
+        };
+        size_t rifiutati = 0;
+        for (size_t i = 0; i < sizeof casi / sizeof casi[0]; i++) {
+            int ie = 0;
+            jval_t *p = tool_e(s, casi[i].nome, casi[i].args, &ie);
+            int valido = 0;
+            double cod = json_num(json_get(p, "codice"), &valido);
+            json_libera(p);
+            if (ie && valido && cod == -32602)
+                rifiutati++;
+        }
+        if (rifiutati != 6) {
+            fprintf(stderr, "GATE [M10] ROTTO: rifiutati %zu su 6"
+                            " (i numeri sporchi devono tornare -32602,"
+                            " non entrare troncati)\n", rifiutati);
+            return 1;
+        }
+        /* la porta ai numeri onesti resta aperta, e la sporca non ha
+         * lasciato niente dietro di se' */
+        jval_t *p = tool(s, "put",
+                         "{\"chiave\":\"sana\",\"valore\":\"v\",\"ttl\":7}");
+        if (!e_vero(p, "scritto")) {
+            fprintf(stderr, "GATE [M10] ROTTO: il ttl onesto non"
+                            " scrive piu'\n");
+            return 1;
+        }
+        json_libera(p);
+        p = tool(s, "get", "{\"chiave\":\"sporca\"}");
+        if (p->tipo != J_NULL) {
+            fprintf(stderr, "GATE [M10] ROTTO: la put sporca ha scritto"
+                            " comunque\n");
+            return 1;
+        }
+        json_libera(p);
+        /* e la sana si riporta via: [M7] dopo difende il conto ESATTO
+         * delle vive e una chiave in piu' lo farebbe urlare */
+        p = tool(s, "del", "{\"chiave\":\"sana\"}");
+        if (!e_vero(p, "cancellata")) {
+            fprintf(stderr, "GATE [M10] ROTTO: la sana non si pulisce\n");
+            return 1;
+        }
+        json_libera(p);
+        printf("     sei sporchi rifiutati col codice, il sano passa,"
+               " la sporca non ha lasciato traccia\n");
+    }
+
     /* ---- [M7] audit: il contratto visibile all'agente */
     printf("[M7] audit: il contratto visibile anche da fuori...\n");
     {
