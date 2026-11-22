@@ -62,7 +62,9 @@ int  jbuf_init(jbuf_t *b);
 void jbuf_libera(jbuf_t *b);
 int  jbuf_add(jbuf_t *b, const char *s, size_t len);
 int  jbuf_testo(jbuf_t *b, const char *s, size_t len);  /* con escape */
-int  jbuf_num(jbuf_t *b, double v);   /* intero se finito, %.17g altrimenti */
+int  jbuf_num(jbuf_t *b, double v);   /* intero se tondo, %.17g altrimenti;
+                                          inf/nan RIFIUTATI: sul filo mai
+                                          un token non-JSON */
 int  json_scrivi(jbuf_t *b, const jval_t *v);            /* ricorsivo      */
 
 /* la lunghezza di un letterale la conta il compilatore, non la mano:

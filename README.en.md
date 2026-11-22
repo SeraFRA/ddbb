@@ -80,7 +80,7 @@ What did **not** make it into the engine, and why (the morgue): the backshift de
 
 ## The MCP layer: the engine as a tool (chapter 11)
 
-Metaphor: *the agent must not know the engine, it must be able to call it — and every answer must declare what it is worth.* Mechanics: an MCP server (spec 2025-06-18, JSON-RPC 2.0 over stdio) on top of the engine's **public API**, without touching its internals: `mcp_stdio.c` (the thin shell: one JSON line in, one out), `mcp_server.c` (the pure, in-process-testable core `mcp_gestisci`), `json.c` (a hand-written minimal parser: zero dependencies, and **one single source of truth** — the wire uses it and the bench uses it to verify the answers). The contract is [M1]..[M9], written before the code:
+Metaphor: *the agent must not know the engine, it must be able to call it — and every answer must declare what it is worth.* Mechanics: an MCP server (spec 2025-06-18, JSON-RPC 2.0 over stdio) on top of the engine's **public API**, without touching its internals: `mcp_stdio.c` (the thin shell: one JSON line in, one out), `mcp_server.c` (the pure, in-process-testable core `mcp_gestisci`), `json.c` (a hand-written minimal parser: zero dependencies, and **one single source of truth** — the wire uses it and the bench uses it to verify the answers). The contract is [M1]..[M11], written before the code:
 
 - **as few round-trips as possible**: `chiedi` returns key AND value AND confidence (never keys alone: the second call for the values is the economic bug); `intervallo` returns the batch plus the total; `presente` is batch (up to 256 keys per call).
 - **confidence always travels**: low confidence = the agent knows it can retry with another wording. Self-correction for one extra round.
@@ -169,7 +169,7 @@ You need `gcc` (MinGW on Windows, gcc on Linux) and `make` (on Windows MSYS2 pro
 ```bash
 make motore_demo        # the engine + the test bench: a gate for EVERY invariant
 make mcp_server         # the MCP server over stdio: ./mcp_server [file.db [tick]]
-make demo_mcp           # the MCP layer bench: gates [M1]..[M9] + MEASUREMENT
+make demo_mcp           # the MCP layer bench: gates [M1]..[M11] + MEASUREMENT
 make prefetch_hook      # the pre_agent hook: ./prefetch_hook [file.db]
 make demo_prefetch      # the prefetcher bench: gates [P1]..[P7], [P9] + MEASUREMENT ([P8] lives in gate [P6], with the budget)
 make demo_multiagente   # the multi-session bench: the cold-start hump
@@ -208,7 +208,7 @@ database*.c            # the nine chapters + the original: each builds alone
 motore.h / motore.c    # the single engine (public API, opaque handle)
 demo_motore.c          # the test bench: a gate per invariant
 json.h / json.c        # the minimal JSON parser: one source of truth for the wire
-mcp_server.h / mcp_server.c  # the MCP core: 10 tools, contract [M1]..[M9]
+mcp_server.h / mcp_server.c  # the MCP core: 10 tools, contract [M1]..[M11]
 mcp_stdio.c            # the thin shell: stdin/stdout, one object per line
 demo_mcp.c             # the layer's bench: gates and MEASUREMENT (latency, tokens)
 prefetch.h / prefetch.c      # the speculative prefetcher: contract [P1]..[P9]

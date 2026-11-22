@@ -135,6 +135,13 @@ int jbuf_num(jbuf_t *b, double v)
 {
     char tmp[40];
     int scritti;
+    /* il filo non trasporta non-finiti: 1e999 e' grammatica RFC
+     * 8259 valida, strtod lo fa inf, ma "inf"/"nan" NON sono token
+     * JSON — chi scrive rifiuta ad alta voce, il round-trip
+     * corrotto muore qui (rosso della review dei subagent,
+     * verificato in proprio il 22-11) */
+    if (!isfinite(v))
+        return -1;
     if (v >= -9.0e15 && v <= 9.0e15 && v == floor(v))
         scritti = snprintf(tmp, sizeof tmp, "%.0f", v);
     else

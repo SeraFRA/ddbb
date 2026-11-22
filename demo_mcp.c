@@ -1,7 +1,7 @@
 /*
  * demo_mcp.c — il banco di prova del layer MCP (capitolo 11).
  *
- * Non e' una demo: ogni regola del contratto [M1]..[M9] ha un gate
+ * Non e' una demo: ogni regola del contratto [M1]..[M11] ha un gate
  * con soglia numerata, e un gate che salta ferma tutto con EXIT!=0.
  * Il banco chiama il NUCLEO in process [M9]: niente pipe, niente
  * "forse funziona" — ogni risposta torna indietro dallo stesso filo
@@ -23,6 +23,13 @@
  *              coerente == true
  *   GATE [M8]  le description dichiarano i limiti (SINTATTICA,
  *              "certamente", il forse del bloom)
+ *   GATE [M9]  la put che il motore rifiuta non risorge: la
+ *              compensazione WAL non risponde per lui, la viva
+ *              resta viva
+ *   GATE [M10] i numeri sporchi (ttl/k: frazioni, negativi, 1e999)
+ *              si rifiutano col codice -32602, non si troncano
+ *   GATE [M11] il non-finito non sale sul filo: jbuf_num rifiuta
+ *              inf/nan, il round-trip di 1e999 muore ad alta voce
  *   GATE [I11] il secondo opener dello stesso db cade ad alta voce;
  *              la sua caduta non acceca il primo; chiuso il primo,
  *              il secondo ci riesce (il caso due-processi lo prova
@@ -570,6 +577,80 @@ int main(void)
         json_libera(p);
         printf("     sei sporchi rifiutati col codice, il sano passa,"
                " la sporca non ha lasciato traccia\n");
+    }
+
+    /* ---- [M11] il non-finito non sale sul filo (rosso della review
+     * dei subagent del 22-11: 1e999 e' grammatica RFC 8259 valida,
+     * strtod lo fa inf, e jbuf_num lo metteva in filo come token
+     * "inf" non-JSON — oggi il layer tool lo ferma coi range [M10],
+     * ma la LIBRERIA non puo' dipendere dalla cortesia dei chiamanti:
+     * il filo resta JSON o niente) */
+    printf("[M11] il non-finito si rifiuta sul filo, non si scrive...\n");
+    {
+        jbuf_t b;
+        size_t rifiutati = 0;
+        const double sporchi[3] = { INFINITY, -INFINITY, NAN };
+        for (size_t i = 0; i < 3; i++) {
+            if (jbuf_init(&b) != 0) {
+                fprintf(stderr, "GATE [M11] ROTTO: jbuf_init\n");
+                return 1;
+            }
+            if (jbuf_num(&b, sporchi[i]) != 0)
+                rifiutati++;
+            jbuf_libera(&b);
+        }
+        if (rifiutati != 3) {
+            fprintf(stderr, "GATE [M11] ROTTO: rifiutati %zu su 3"
+                            " (inf/nan NON sono token JSON, non si"
+                            " scrivono)\n", rifiutati);
+            return 1;
+        }
+        /* la porta ai numeri onesti resta aperta */
+        if (jbuf_init(&b) != 0
+            || jbuf_num(&b, 42.0) != 0 || strcmp(b.p, "42") != 0
+            || jbuf_num(&b, 0.5) != 0 || strcmp(b.p, "420.5") != 0) {
+            fprintf(stderr, "GATE [M11] ROTTO: la guardia ha chiuso"
+                            " la porta ai numeri onesti\n");
+            jbuf_libera(&b);
+            return 1;
+        }
+        jbuf_libera(&b);
+        /* il round-trip intero: il parse ACCETTA 1e999 (grammatica
+         * valida, il valore arriva inf), il serialize RIFIUTA
+         * l'albero — l'onestà e' divisa: il filo d'ingresso non
+         * inventa divieti, il filo d'uscita non corrompe */
+        jval_t *v = json_parse("{\"x\":1e999}",
+                               sizeof("{\"x\":1e999}") - 1);
+        if (!v) {
+            fprintf(stderr, "GATE [M11] ROTTO: il parse deve accettare"
+                            " 1e999 (grammatica RFC valida)\n");
+            return 1;
+        }
+        int valido = 0;
+        double x = json_num(json_get(v, "x"), &valido);
+        if (!valido || !isinf(x)) {
+            fprintf(stderr, "GATE [M11] ROTTO: il parse ha perso il"
+                            " valore non-finito lungo la strada\n");
+            json_libera(v);
+            return 1;
+        }
+        if (jbuf_init(&b) != 0) {
+            fprintf(stderr, "GATE [M11] ROTTO: jbuf_init\n");
+            json_libera(v);
+            return 1;
+        }
+        int rc = json_scrivi(&b, v);
+        int inf_sul_filo = (b.p != NULL && strstr(b.p, "inf") != NULL);
+        jbuf_libera(&b);
+        json_libera(v);
+        if (rc == 0 || inf_sul_filo) {
+            fprintf(stderr, "GATE [M11] ROTTO: il round-trip di 1e999"
+                            " non muore ad alta voce (rc=%d,"
+                            " inf sul filo=%d)\n", rc, inf_sul_filo);
+            return 1;
+        }
+        printf("     tre non-finiti rifiutati, i sani passano, il"
+               " round-trip di 1e999 muore senza scrivere inf\n");
     }
 
     /* ---- [M7] audit: il contratto visibile all'agente */

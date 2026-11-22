@@ -39,3 +39,6 @@ demo_gateway
 # la tmp del salva atomico [I12]: muore col rename, ma un crash a meta'
 # la lascia li' — ignorata, il prossimo salva la riscrive
 *.db.tmp
+
+# la ricerca di mercato dell'umano: scelta sua, resta SOLO in locale
+ricerca-mcp.md

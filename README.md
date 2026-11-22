@@ -80,7 +80,7 @@ Cosa **non** è entrato nel motore, e perché (l'obitorio): la delete a backshif
 
 ## Il layer MCP: il motore come strumento (capitolo 11)
 
-Metafora: *l'agente non deve conoscere il motore, deve poterlo chiamare — e ogni risposta deve dichiarare quanto vale.* Meccanica: un server MCP (spec 2025-06-18, JSON-RPC 2.0 su stdio) sopra l'**API pubblica** del motore, senza toccarne l'interno: `mcp_stdio.c` (il guscio: una riga JSON in, una riga JSON out), `mcp_server.c` (il nucleo `mcp_gestisci`, puro e testabile in process), `json.c` (parser minimale scritto a mano: zero dipendenze, e **una fonte di verità sola** — lo usa il filo e lo usa il banco per verificare le risposte). Il contratto è [M1]..[M9], scritto prima del codice:
+Metafora: *l'agente non deve conoscere il motore, deve poterlo chiamare — e ogni risposta deve dichiarare quanto vale.* Meccanica: un server MCP (spec 2025-06-18, JSON-RPC 2.0 su stdio) sopra l'**API pubblica** del motore, senza toccarne l'interno: `mcp_stdio.c` (il guscio: una riga JSON in, una riga JSON out), `mcp_server.c` (il nucleo `mcp_gestisci`, puro e testabile in process), `json.c` (parser minimale scritto a mano: zero dipendenze, e **una fonte di verità sola** — lo usa il filo e lo usa il banco per verificare le risposte). Il contratto è [M1]..[M11], scritto prima del codice:
 
 - **meno round-trip possibile**: `chiedi` torna chiave E valore E confidenza (mai solo le chiavi: la seconda chiamata per i valori è il bug economico); `intervallo` torna il batch più il totale; `presente` è batch (fino a 256 chiavi per chiamata).
 - **la confidenza viaggia sempre**: confidenza bassa = l'agente sa che può ritentare con un'altra formulazione. Auto-correzione a un solo giro in più.
@@ -170,7 +170,7 @@ Serve `gcc` (MinGW su Windows, gcc su Linux) e `make` (su Windows lo porta MSYS2
 ```bash
 make motore_demo        # il motore + il banco di prova: gate per OGNI invariante
 make mcp_server         # il server MCP su stdio: ./mcp_server [file.db [tick]]
-make demo_mcp           # il banco del layer MCP: gate [M1]..[M9] + MISURA
+make demo_mcp           # il banco del layer MCP: gate [M1]..[M11] + MISURA
 make prefetch_hook      # l'hook pre_agent: ./prefetch_hook [file.db]
 make demo_prefetch      # il banco del prefetcher: gate [P1]..[P7], [P9] + MISURA ([P8] vive nel gate [P6], col bilancio)
 make demo_multiagente   # il banco multi-sessione: la gobba del cold start
@@ -209,7 +209,7 @@ database*.c            # i nove capitoli + l'originale: ognuno si compila da sol
 motore.h / motore.c    # il motore unico (API pubblica, handle opaco)
 demo_motore.c          # il banco di prova: gate a ogni invariante
 json.h / json.c        # il parser JSON minimale: una fonte di verita' per il filo
-mcp_server.h / mcp_server.c  # il nucleo MCP: 10 tool, contratto [M1]..[M9]
+mcp_server.h / mcp_server.c  # il nucleo MCP: 10 tool, contratto [M1]..[M11]
 mcp_stdio.c            # il guscio sottile: stdin/stdout, un oggetto per riga
 demo_mcp.c             # il banco del layer: gate e MISURA (latenze, token)
 prefetch.h / prefetch.c      # il prefetcher speculativo: contratto [P1]..[P9]
