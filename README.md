@@ -1,6 +1,8 @@
+# ddbb
+
 [![ci](https://github.com/SeraFRA/ddbb/actions/workflows/ci.yml/badge.svg)](https://github.com/SeraFRA/ddbb/actions/workflows/ci.yml)
 
-**An in-memory key-value store in pure C11 — native TTL, a WAL that survives crashes, a shared blackboard for agents, and an MCP layer that turns it into a tool any LLM agent can call.**
+**A working-memory engine for AI agents: an in-memory key-value store in pure C11 — native TTL, a write-ahead log, a single-owner blackboard, and an MCP layer that turns it into a tool any LLM agent can call.**
 
 Zero dependencies: C11 and the standard library, one binary. Every claim in this README is a gate that runs in CI at every push; every number is measured, never promised. The full story of the project — the educational path, all fourteen chapters with their post mortems, real agent runs — is in Italian in [didattica/README.md](didattica/README.md).
 
