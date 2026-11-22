@@ -6,7 +6,7 @@ Zero dependencies: C11 and the standard library, one binary. Every claim in this
 
 ## TL;DR
 
-- **What it is**: an in-process KV engine with TTL as a *contract* (timing wheel, batch O(1) death — expired memory is gone, not down-ranked), range scans, syntactic similarity with **confidence declared on every single answer**, a write-ahead log, and an MCP server with two shells: stdio and a single-owner TCP gateway (N clients, one custode).
+- **What it is**: an in-process KV engine with TTL as a *contract* (timing wheel, batch O(1) death — expired memory is gone, not down-ranked), range scans, syntactic similarity with **confidence declared on every single answer**, a write-ahead log, and an MCP server with two shells: stdio and a single-owner TCP gateway (N clients, one custode) — plus the prefetcher below.
 - **What it is NOT**: no SQL, no schema, no embeddings (similarity is syntactic — it catches typos, not synonyms), no replication, no threads, single file. The limits are declared, not discovered in production.
 - **Who it's for**: agent working memory — the profile that writes a lot and queries selectively. A `put` is microseconds and zero LLM calls; extraction-based memory systems (Mem0/Zep-class) pay an LLM round per ingested message instead.
 
@@ -17,6 +17,34 @@ make demo_mcp                      # the MCP layer bench: gates [M1]..[M11] + ME
 ```
 
 You need `gcc` and `make` (on Windows: MinGW + `mingw32-make`). Any chapter also builds alone: `make database_quotient`.
+
+## The headline: a prefetcher that reads the agent's thoughts
+
+The one feature the memory-server market does not have (checked against the
+catalogs, November 2026 — [the study](studio-utilita.md) has the details).
+The CPU prefetches instructions by watching the stream; this engine prefetches
+**by watching the agent's reasoning trace**. A `pre_agent` hook reads what the
+agent is thinking about, predicts up to 4 keys it will likely need, and parks
+the predictions **next to the engine, not in the context** — the LLM's window
+is the expensive resource. When the agent asks, the answer is already staged
+at zero discovery cost; the offers travel as injected one-liners with declared
+confidence.
+
+Built-in honesty, three ways:
+
+- **forgetting is built in**: wrong predictions die on their own in a short
+  TTL (amortized O(1) batches) — the failed prefetcher disposes of itself;
+- **the balance is measured in bytes** (savings from avoided discoveries minus
+  the cost of the injected handles), exposed by the `prefetch_stat` tool with
+  a numbered threshold: below it, speculation pollutes more than it saves;
+- **the disproof is published**: the gain is a cold-start hump (hit-rate 1.00
+  with 3 talking keys, a tie at 40, noise at 200 — see the numbers below),
+  not a promise that holds everywhere. The number that contradicted the idea
+  is in this README with the same font as the one that confirmed it.
+
+It also dedups against what the agent already has in context, and since
+chapter 14 the hook reads live through the gateway as a normal client of the
+blackboard.
 
 ## Measured, not promised
 
@@ -58,7 +86,7 @@ Signature contract lines:
 - **[I11] one db, one owner** — the second process to open the same file falls loudly, never two silent writers on one WAL.
 - **Honesty as an API**: exact hit → confidence 1.0; fuzzy → the value with a declared similarity; nothing → silence; the Bloom filter's "maybe" is distinct from the index's "no". The audit tool makes a broken contract visible to the agent too.
 - **The clock belongs to the caller [I8]**: no wall-clock time inside the engine's decisions.
-- **The speculative prefetcher (chapter 12)**: a hook watches the agent's reasoning trace and stages the keys it will likely need — with built-in forgetting (the wrong predictions die on their own in the TTL) and a measured byte balance. The gain is a cold-start hump, and the disproof is published with the same font as the proof.
+- **The speculative prefetcher**: the headline section above — the feature the market does not have, with built-in forgetting and a measured byte balance.
 
 Every gate above runs in CI on every push, with `-Werror` and ASan+UBSan: a broken contract turns the badge red. The contracts were written before the code — the full list with post mortems is in [didattica/README.md](didattica/README.md).
 

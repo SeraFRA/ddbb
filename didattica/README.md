@@ -1,12 +1,10 @@
-# progettodatabase
+# Il racconto del progettodatabase
 
-[![ci](https://github.com/SeraFRA/ddbb/actions/workflows/ci.yml/badge.svg)](https://github.com/SeraFRA/ddbb/actions/workflows/ci.yml)
-
-[English](README.en.md) | Italiano
+*Questa cartella e' il percorso educativo e la storia del progetto. La facciata del prodotto — cos'e', come si compila, i numeri sintetici, in inglese — e' il [README della radice](../README.md).*
 
 **Un database in C puro, nato da un array di valori contigui e cresciuto fino a un motore con persistenza, indice appreso, memoria semantica — e un layer MCP che lo rende uno strumento chiamabile dagli agenti.**
 
-Progetto didattico per autodidatti: ogni file è un capitolo autonomo e compilabile, verificato con test automatici e **numeri misurati contro la teoria** — mai promessi, sempre misurati. Zero librerie esterne: solo C11 e la stdlib. La storia è per interi commit: ogni capitolo ha il suo post mortem nel messaggio di commit.
+Progetto didattico per autodidatti: ogni file è un capitolo autonomo e compilabile, verificato con test automatici e **numeri misurati contro la teoria** — mai promessi, sempre misurati. Zero librerie esterne: solo C11 e la stdlib. I post mortem della storia vivono nel [registro](post-mortem.md) accanto (i commit d'epoca li portano nel messaggio: la storia è per interi commit, quelli nuovi in inglese sono solo la messa in servizio).
 
 ---
 
@@ -23,10 +21,10 @@ Le metafore sono state il vero motore del design. Le principali:
 
 | l'autore ha detto | tradotta in meccanica, è diventata | nel capitolo |
 |---|---|---|
-| "un dipendente che si ricorda dove mette i prodotti negli scaffali, e li trova grazie alla probabilità delle volte prima" | **indice learned**: la previsione della posizione sostituisce la partenza a caso; l'invariante è che chi cambia la sua "memoria" ricostruisce la tabella | `didattica/database_learned.c` |
-| "un database che si comporti come la memoria umana: ogni cosa collegata e vicina in uno spazio semantico probabilistico" | **MinHash + banding LSH**: lo spazio semantico è l'insieme dei bigrammi posizionali; due chiavi sono "vicine" se condividono pezzi; la probabilità d'incontro è la firma | `didattica/database_semantic.c` |
+| "un dipendente che si ricorda dove mette i prodotti negli scaffali, e li trova grazie alla probabilità delle volte prima" | **indice learned**: la previsione della posizione sostituisce la partenza a caso; l'invariante è che chi cambia la sua "memoria" ricostruisce la tabella | `database_learned.c` |
+| "un database che si comporti come la memoria umana: ogni cosa collegata e vicina in uno spazio semantico probabilistico" | **MinHash + banding LSH**: lo spazio semantico è l'insieme dei bigrammi posizionali; due chiavi sono "vicine" se condividono pezzi; la probabilità d'incontro è la firma | `database_semantic.c` |
 | "un db che non sia puramente determinista: dia risposte probabili, rispondendo alle domande con le sue entry" | la **confidenza dichiarata**: hit esatto → 1.0; refuso → top-k col valore, gruppo dei pari-merito quando la verità è ambigua, silenzio quando non c'è niente da dire | `db_chiedi` / `motore_chiedi` |
-| "i dati che scadono non vanno controllati a ogni lettura" | **timing wheel**: la scadenza smette di essere un calcolo e diventa un luogo dell'anello | `didattica/database_ring.c` |
+| "i dati che scadono non vanno controllati a ogni lettura" | **timing wheel**: la scadenza smette di essere un calcolo e diventa un luogo dell'anello | `database_ring.c` |
 
 Il punto onesto: l'AI ha proposto anche capitoli per conto suo (Bloom/quotient, persistenza), ma le intuizioni che hanno girato il progetto verso il probabilistico sono tutte dell'autore — ed è lì che sta il valore della collaborazione: le metafore umane hanno scelto **quali** tecniche meritavano di esistere, l'AI ha scelto **come** farle funzionare e ne ha pagato i bug, documentandoli.
 
@@ -40,16 +38,16 @@ Cosa ha insegnato, in una frase: una metafora umana più un test che sa fallire 
 
 | # | file | what's in it | nel mondo reale si chiama | il numero da ricordare |
 |---|------|--------------|---------------------------|------------------------|
-| 0 | `didattica/database.c` | il punto di partenza: array contiguo di entry, il codice originale con i suoi bug didattici — lasciato intonso: è il fossile | — | — |
-| 1 | `didattica/database_debug.c` | la prima sistemazione: bug di frontiera, strumenti di ispezione, marker `FIX` | debugging | — |
-| 2 | `didattica/database_indexed.c` | buffer append-only + indice hash | **Bitcask** (append-only log + hash in RAM) | get O(1), catene di probing |
-| 3 | `didattica/database_compact.c` | tombstone, compattazione O(n), percentili p50/p90/p99 | il **merge** degli LSM | la distribuzione batte la media |
-| 4 | `didattica/database_persist.c` | CRC-32 per entry, snapshot compattati, load validato: prefisso sicuro | checksum + snapshot (SQLite, RocksDB) | 1 byte corrotto = persa solo quell'entry |
-| 5 | `didattica/database_learned.c` | spline sulla CDF delle chiavi al posto dell'hash di partenza | **learned index** (Kraska 2017) | l'invariante: cambi la funzione di partenza → ricostruisci |
-| 6 | `didattica/database_semantic.c` | bigrammi posizionali + MinHash + banding LSH: il db che capisce i refusi | **MinHash/LSH** (Broder 1997) | refusi ripescati nel top-8, ambiguità dichiarata |
-| 7 | `didattica/database_ring.c` | la scadenza come LUOGO (anello di tick) + delete a backshift | **timing wheel** (kernel Linux) | scadenze in batch, O(1) ammortizzato |
-| 8 | `didattica/database_quotient.c` | Bloom e quotient filter, la contabilità dei bit | **Bloom 1970 / Bender 2012** | falsi positivi misurati 0.777% vs 0.82% di teoria |
-| 9 | `didattica/database_persist_semantic.c` | la fusione: la risposta semantica viene dal disco, col valore — con l'esperimento *invariants-first* | — | 0 sbagliate su 60000 verifiche dal disco |
+| 0 | `database.c` | il punto di partenza: array contiguo di entry, il codice originale con i suoi bug didattici — lasciato intonso: è il fossile | — | — |
+| 1 | `database_debug.c` | la prima sistemazione: bug di frontiera, strumenti di ispezione, marker `FIX` | debugging | — |
+| 2 | `database_indexed.c` | buffer append-only + indice hash | **Bitcask** (append-only log + hash in RAM) | get O(1), catene di probing |
+| 3 | `database_compact.c` | tombstone, compattazione O(n), percentili p50/p90/p99 | il **merge** degli LSM | la distribuzione batte la media |
+| 4 | `database_persist.c` | CRC-32 per entry, snapshot compattati, load validato: prefisso sicuro | checksum + snapshot (SQLite, RocksDB) | 1 byte corrotto = persa solo quell'entry |
+| 5 | `database_learned.c` | spline sulla CDF delle chiavi al posto dell'hash di partenza | **learned index** (Kraska 2017) | l'invariante: cambi la funzione di partenza → ricostruisci |
+| 6 | `database_semantic.c` | bigrammi posizionali + MinHash + banding LSH: il db che capisce i refusi | **MinHash/LSH** (Broder 1997) | refusi ripescati nel top-8, ambiguità dichiarata |
+| 7 | `database_ring.c` | la scadenza come LUOGO (anello di tick) + delete a backshift | **timing wheel** (kernel Linux) | scadenze in batch, O(1) ammortizzato |
+| 8 | `database_quotient.c` | Bloom e quotient filter, la contabilità dei bit | **Bloom 1970 / Bender 2012** | falsi positivi misurati 0.777% vs 0.82% di teoria |
+| 9 | `database_persist_semantic.c` | la fusione: la risposta semantica viene dal disco, col valore — con l'esperimento *invariants-first* | — | 0 sbagliate su 60000 verifiche dal disco |
 | 11 | `mcp_server.c` + `mcp_stdio.c` | il layer MCP: il motore come strumento per un agente LLM — 10 tool, confidenza sempre dichiarata, `presente` batch | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms del giro LLM |
 | 12 | `prefetch.c` + `prefetch_hook.c` | il prefetcher speculativo: un hook pre_agent legge la traccia dei pensieri dell'agente, predice le chiavi che serviranno e le parcheggia accanto al motore con TTL in richieste; il server MCP consuma lo staging e conta i colpi | **prefetch speculativo** (quello delle CPU, applicato all'IO dell'agente) | hit-rate 1.00 sul filo intero del banco, soglia 0.50 |
 | 13 | `wal.c` + `misura_fsync.c` | il write-ahead log: le intenzioni si inchiostrano una per una (fwrite+fflush+fsync) prima di toccare il motore; il replay ricostruisce tutto fra due snapshot, la coda marcia si tronca | **WAL** (Bitcask, Postgres, SQLite) | 216 µs per put durabile (p50), il replay è esatto: 212/212 |
@@ -163,27 +161,6 @@ I numeri del banco `demo_gateway` (gate incluso, processi e socket veri): A scri
 
 Il post mortem del capitolo ha 40 anni: **Nagle + delayed-ACK** (1984, e il delayed-ACK di Linux): il send da 1 byte del `'\n'` restava nello stomaco del kernel fino a 40 ms — il banco si sarebbe appeso in CI e su Windows il timing benigno lo nascondeva. Cura: `TCP_NODELAY` su socket accettati e cliente (la stessa pillola di Redis), e attese con scadenza nel banco. Obitorio: zero thread (una risposta enorme ritarda le altre — la stessa rinuncia [W6]), zero keepalive in v1, nessuna autenticazione (per questo [L6]).
 
-## Compilare ed eseguire
-
-Serve `gcc` (MinGW su Windows, gcc su Linux) e `make` (su Windows lo porta MSYS2 come `mingw32-make`; a mano: `gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O2 -o motore_demo motore.c demo_motore.c`). Niente dipendenze.
-
-```bash
-make motore_demo        # il motore + il banco di prova: gate per OGNI invariante
-make mcp_server         # il server MCP su stdio: ./mcp_server [file.db [tick]]
-make demo_mcp           # il banco del layer MCP: gate [M1]..[M11] + MISURA
-make prefetch_hook      # l'hook pre_agent: ./prefetch_hook [file.db]
-make demo_prefetch      # il banco del prefetcher: gate [P1]..[P7], [P9] + MISURA ([P8] vive nel gate [P6], col bilancio)
-make demo_multiagente   # il banco multi-sessione: la gobba del cold start
-make mcp_gateway        # il guscio-2: ./mcp_gateway [file.db [tick]] — la lavagna in ascolto
-make demo_gateway       # il banco della lavagna: gate [L1]..[L6] + MISURA della porta
-make database_quotient  # qualunque capitolo, uno per volta
-./motore_demo           # esce con EXIT!=0 se un contratto salta
-```
-
-Su Windows: il Device Guard può bloccare le exe appena compilate nella cartella del progetto (exit 126). Attendere qualche secondo e ripetere, o compilare in una directory fuori dai criteri.
-
-Il push è protetto dalla CI: a ogni push un job ubuntu+gcc ricompila ogni capitolo e **lo fa girare come banco di prova** — un contratto che salta rende rosso il badge in testa al README. Le prime due prede della CI: il porting Linux (quattro capitoli compilavano solo su MinGW perché il ramo non-Windows usava `struct timespec` e `clock_gettime` senza includere `<time.h>`; e anche includendolo, con `-std=c11` stretto la glibc non dichiara `clock_gettime` senza `_POSIX_C_SOURCE`) e il link di `pow()`: su Linux vive in libm, che MinGW piega dentro il runtime — ecco perché in locale linkava. Ora Makefile: `_POSIX_C_SOURCE` nei CFLAGS, `-lm` negli LDLIBS.
-
 ## I numeri del motore (misurati, non promessi)
 
 - 50000 chiavi vive su disco (2.46 MB): compattazione con ordinamento 64 ms, ricarica con ricostruzione di semantica, porte e anello 64 ms, 0 sbagliate su 60000 verifiche.
@@ -202,37 +179,6 @@ Questo repo è anche un diario di come si impara a costruire cose che non si san
 - **Invariants-first.** Il contratto scritto prima del codice sposta la cattura dei bug a sinistra (nel design). Nel decimo capitolo: 8 trappole catturate a tavolino, 1 al primo run. Nel motore: il bug vero l'ha trovato un warning `-Wall` prima ancora del run.
 - **L'onestà è un'API.** Confidenze dichiarate, silenzio invece dell'invenzione, "forse" del Bloom distinto dal "no" del probe.
 
-## Struttura
-
-```
-didattica/database*.c  # il PERCORSO EDUCATIVO (chiuso): il fossile + i nove
-                       # capitoli, ognuno si compila da solo — documentazione
-motore.h / motore.c    # IL PRODOTTO, da qui in giu': l'engine unico (API pubblica, handle opaco)
-prove/demo_motore.c     # il banco di prova: gate a ogni invariante
-json.h / json.c        # il parser JSON minimale: una fonte di verita' per il filo
-mcp_server.h / mcp_server.c  # il nucleo MCP: 10 tool, contratto [M1]..[M11]
-mcp_stdio.c            # il guscio sottile: stdin/stdout, un oggetto per riga
-prove/demo_mcp.c        # il banco del layer: gate e MISURA (latenze, token)
-prefetch.h / prefetch.c      # il prefetcher speculativo: contratto [P1]..[P9]
-prefetch_hook.c        # l'hook pre_agent: traccia -> predizione -> staging
-prove/demo_prefetch.c   # il banco del prefetcher: gate e MISURA (hit-rate, bilancio)
-wal.h / wal.c          # il write-ahead log: contratto [W1]..[W6], il replay esatto
-prove/demo_wal.c        # il banco del WAL: crash simulati, coda marcia, taglio
-prove/misura_fsync.c    # la MISURA che ha chiuso la decisione sulla durabilita'
-prove/demo_multiagente.c # il banco multi-sessione: la gobba del cold start, [B1]..[B6]
-gateway.h / gateway.c  # il gateway: la lavagna a un solo custode, [L1]..[L6]
-mcp_gateway.c           # il guscio-2: la porta TCP su 127.0.0.1
-prove/demo_gateway.c    # il banco della lavagna: processi veri, socket veri, MISURA della porta
-studio-utilita.md       # lo studio d'utilita': quando serve, quanto aiuta, il confronto col mercato
-.vibe/hooks.toml       # l'hook montato: pre_agent, fail-open
-Makefile               # make motore_demo | make mcp_server | make <capitolo>
-.gitignore             # eseguibili e file di prova non entrano nel repo
-```
-
 ## Dove proseguire
 
 Il motore dichiara i suoi limiti nell'header di `motore.c`: single-thread, statistiche via `printf` (progetto didattico), risposte vive fino alla prossima put. La concorrenza "a un estremo per volta" è arrivata col capitolo 14 (lucchetto, snapshot atomico, gateway) — ma dichiarata nei suoi limiti, non promessa: zero thread, zero keepalive, nessuna autenticazione. I passi naturali dopo: il banco **vivente** — agenti LLM veri (piccoli, effort basso) che si parlano addosso attraverso la lavagna, e il passamano speculative del prefetcher fra traccia di uno e get di un altro; poi il tick dentro il file PDB1 (formato v2, per le TTL replayate a orologio mobile) e iteratori stabili.
-
-## Licenza
-
-MIT — vedi [LICENSE](LICENSE).
