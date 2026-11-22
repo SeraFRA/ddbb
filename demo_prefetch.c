@@ -2,10 +2,13 @@
  * demo_prefetch.c — il banco di prova del prefetcher speculativo
  * (capitolo 12).
  *
- * Non e' una demo: ogni regola del contratto [P1]..[P9] ha un gate
- * con soglia numerata, e un gate che salta ferma tutto con EXIT!=0.
- * Il banco chiama la meccanica in process e il filo MCP del capitolo
- * 11 per la prova end-to-end: il colpo attraversa davvero il filo.
+ * Non e' una demo: le regole del contratto [P1]..[P9] hanno i loro
+ * gate numerati qui (e chi salta ferma tutto con EXIT!=0). La mappa
+ * onesta: [P8], il bilancio in byte, e' il gate [P6] — end-to-end
+ * sul filo, con la soglia hit_rate >= 0.50; [P9], la stalezza del
+ * produttore, ha il suo gate qui sotto. Il banco chiama la meccanica
+ * in process e il filo MCP del capitolo 11 per la prova end-to-end:
+ * il colpo attraversa davvero il filo.
  *
  *   GATE [P1] la coda e' la piu' viva: la traccia lunga predice dal
  *              pensiero recente; il pensiero oltre le 64 finestre
@@ -25,6 +28,9 @@
  *              del capitolo: sotto, la speculazione inquina)
  *   GATE [P7] il journal: la traccia esce dai pensieri recenti,
  *              dedup per testo, dal vecchio al nuovo
+ *   GATE [P9] la stalezza del produttore: la chiave solo-viva e'
+ *              cieca a chi legge lo snapshot (l'hook), visibile al
+ *              padrone dell'arena viva: discriminazione = prova
  *   GATE [MISURA] predici p99 < 10 ms su traccia da 8 KB;
  *              consuma p99 < 2 ms; tocca p99 < 20 us
  */
@@ -637,6 +643,77 @@ int main(void)
     }
     printf("     due pensieri in ordine, dedup del ripetuto, journal"
            " muto = traccia vuota\n");
+
+    /* ---- [P9] il produttore vede l'ultimo salva, non l'arena viva */
+    printf("[P9] la stalezza dichiarata: il produttore legge lo"
+           " snapshot...\n");
+    {
+        mcp_t *s3 = mcp_apri("banco12.db", 1, NULL);
+        if (!s3) {
+            fprintf(stderr, "memoria MCP\n");
+            return 1;
+        }
+        char req[512];
+        /* una chiave salvata e una solo-viva: la discriminazione
+         * e' la prova della [P9] */
+        snprintf(req, sizeof req,
+                 "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\","
+                 "\"params\":{\"name\":\"put\",\"arguments\":"
+                 "{\"chiave\":\"p9/visibile\",\"valore\":\"salvata\"}}}");
+        jval_t *r = chiama(s3, req);
+        json_libera(r);
+        snprintf(req, sizeof req,
+                 "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"tools/call\","
+                 "\"params\":{\"name\":\"salva\",\"arguments\":"
+                 "{\"nome\":\"banco12.db\"}}}");
+        r = chiama(s3, req);
+        json_libera(r);
+        snprintf(req, sizeof req,
+                 "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"tools/call\","
+                 "\"params\":{\"name\":\"put\",\"arguments\":"
+                 "{\"chiave\":\"p9/invisibile\",\"valore\":\"solo-viva\"}}}");
+        r = chiama(s3, req);
+        json_libera(r);
+
+        /* il produttore: legge lo SNAPSHOT, come l'hook [P9] */
+        size_t scartate = 0;
+        motore_t *snap = motore_apri_da("banco12.db", 1, &scartate);
+        if (!snap) {
+            fprintf(stderr, "GATE [P9] ROTTO: lo snapshot non apre\n");
+            return 1;
+        }
+        motore_risposta_t rs[8];
+        size_t totali = 0;
+        motore_intervallo(snap, "p9/", 3, "p90", 4, 8, rs, &totali, NULL);
+        uint32_t visibile_len = 0;
+        const uint8_t *vis =
+            motore_get(snap, "p9/visibile", 11, &visibile_len);
+        uint32_t invisibile_len = 0;
+        const uint8_t *invis =
+            motore_get(snap, "p9/invisibile", 13, &invisibile_len);
+        motore_chiudi(snap);
+        /* il padrone invece vede l'arena viva: non e' cieco lui —
+         * la discriminazione produttore/padrone e' tutta la [P9] */
+        size_t rl = 0;
+        char *grez = grezzo(s3,
+            "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\","
+            "\"params\":{\"name\":\"get\",\"arguments\":"
+            "{\"chiave\":\"p9/invisibile\"}}}", &rl);
+        int il_padrone_vede = (grez && strstr(grez, "solo-viva")) ? 1 : 0;
+        free(grez);
+        if (totali != 1 || !vis || invis != NULL ||
+                visibile_len != 7 || !il_padrone_vede) {
+            fprintf(stderr, "GATE [P9] ROTTO: lo snapshot conta %zu"
+                            " (atteso 1), visibile %d, invisibile %d"
+                            " (attesa cieca), il padrone vede %d\n",
+                    totali, !!vis, !!invis, il_padrone_vede);
+            return 1;
+        }
+        printf("     la salvata si vede, la solo-viva e' cieca al"
+               " produttore — e il padrone la vede: la stalezza e'"
+               " un contratto scritto, non una sorpresa\n");
+        mcp_chiudi(s3);
+    }
 
     /* ---- [MISURA] i numeri del capitolo */
     printf("[MISURA] predici su 8 KB di traccia, consuma, tocca...\n");

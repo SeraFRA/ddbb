@@ -172,7 +172,7 @@ make motore_demo        # il motore + il banco di prova: gate per OGNI invariant
 make mcp_server         # il server MCP su stdio: ./mcp_server [file.db [tick]]
 make demo_mcp           # il banco del layer MCP: gate [M1]..[M9] + MISURA
 make prefetch_hook      # l'hook pre_agent: ./prefetch_hook [file.db]
-make demo_prefetch      # il banco del prefetcher: gate [P1]..[P7] + MISURA
+make demo_prefetch      # il banco del prefetcher: gate [P1]..[P7], [P9] + MISURA ([P8] vive nel gate [P6], col bilancio)
 make demo_multiagente   # il banco multi-sessione: la gobba del cold start
 make mcp_gateway        # il guscio-2: ./mcp_gateway [file.db [tick]] — la lavagna in ascolto
 make demo_gateway       # il banco della lavagna: gate [L1]..[L6] + MISURA della porta

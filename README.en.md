@@ -171,7 +171,7 @@ make motore_demo        # the engine + the test bench: a gate for EVERY invarian
 make mcp_server         # the MCP server over stdio: ./mcp_server [file.db [tick]]
 make demo_mcp           # the MCP layer bench: gates [M1]..[M9] + MEASUREMENT
 make prefetch_hook      # the pre_agent hook: ./prefetch_hook [file.db]
-make demo_prefetch      # the prefetcher bench: gates [P1]..[P7] + MEASUREMENT
+make demo_prefetch      # the prefetcher bench: gates [P1]..[P7], [P9] + MEASUREMENT ([P8] lives in gate [P6], with the budget)
 make demo_multiagente   # the multi-session bench: the cold-start hump
 make mcp_gateway        # shell-2: ./mcp_gateway [file.db [tick]] — the blackboard listening
 make demo_gateway       # the blackboard bench: gates [L1]..[L6] + door MEASUREMENT
