@@ -29,23 +29,33 @@ jobs:
           motore_demo mcp_server demo_mcp prefetch_hook demo_prefetch
           demo_wal misura_fsync demo_multiagente mcp_gateway demo_gateway
 
-      - name: collaudo del motore (ASan + UBSan)
+      - name: il banco nudo gira (le soglie oneste vivono qui)
+        run: |
+          ./motore_demo
+          ./demo_wal
+          ./demo_mcp
+          ./demo_prefetch
+
+      - name: collaudo del motore (ASan + UBSan + iniezione del guasto)
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
+              -DMOTORE_COLLAUDO \
               -fsanitize=address,undefined -fno-sanitize-recover=all \
               -o motore_asan motore.c demo_motore.c -lm
           ./motore_asan
 
-      - name: collaudo del layer MCP (ASan + UBSan)
+      - name: collaudo del layer MCP (ASan + UBSan, con la put rifiutata iniettata)
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
+              -DMOTORE_COLLAUDO \
               -fsanitize=address,undefined -fno-sanitize-recover=all \
               -o mcp_asan demo_mcp.c mcp_server.c json.c motore.c prefetch.c wal.c -lm
           ./mcp_asan
 
-      - name: collaudo del WAL (ASan + UBSan)
+      - name: collaudo del WAL (ASan + UBSan, con la put monca iniettata)
         run: |
           gcc -Wall -Wextra -Wpedantic -std=c11 -D_POSIX_C_SOURCE=199309L -O1 -g \
+              -DWAL_COLLAUDO \
               -fsanitize=address,undefined -fno-sanitize-recover=all \
               -o wal_asan demo_wal.c wal.c motore.c -lm
           ./wal_asan

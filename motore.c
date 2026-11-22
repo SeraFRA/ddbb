@@ -196,6 +196,16 @@ struct motore {
     uint32_t recinto[N_RECINTO];
     size_t   n_recinto;
     size_t   ordinato_fino;    /* [0, ordinato_fino) e' in ordine    */
+    /* il protocollo del danno: 0 = derivati sani; != 0 = i derivati
+     * sono stantii (una compattazione e' cascata dopo lo swap) MA
+     * l'arena — la verita' [I1] — e' integra. POST MORTEM (review,
+     * giro del 22-11): compatta faceva free+swap PRIMA di bloom e
+     * deriva_db: il loro fallimento lasciava slot/voci puntati a un
+     * buffer morto, corruzione silenziosa su ogni get. Ora: chi
+     * invalida marca nello stesso istante; chi risponde paga un
+     * controllo solo; e il motore GUARISCE da solo, perche' ogni
+     * derivato si ricostruisce dall'unica fonte. */
+    uint32_t guasto;
 };
 
 /* ------------------------------------------------------------- utilita' */
@@ -229,6 +239,24 @@ static size_t entry_dim(const uint8_t *e)
 static int entry_morta(const uint8_t *e)
 {
     return (leggi_u32(e + 16) & MORTA_BIT) != 0;
+}
+
+/*
+ * Scaduta ma non ancora tumata: la morte e' pigra [I3] e le esequie
+ * restano dove sono sempre state (la ruota in batch, il primo get che
+ * tocca, la compattazione che seppellisce) — ma per il LETTORE vale
+ * gia' morta [I8]. POST MORTEM (code review, giro del 22-11):
+ * motore_intervallo contava solo entry_morta, cosi' l'entry scaduta
+ * non ancora tumata passava per viva: get diceva null e intervallo
+ * diceva si', due verdetti diversi per la stessa chiave.
+ */
+static int entry_scaduta(const motore_t *m, const uint8_t *e)
+{
+    uint32_t ttl = leggi_u32(e + 12);
+    if (ttl == 0)
+        return 0;                       /* senza termine, vita eterna */
+    uint32_t nato = leggi_u32(e + 16) & ~MORTA_BIT;
+    return (uint32_t)(m->adesso - nato) >= ttl;
 }
 
 static void segna_morta(uint8_t *data, size_t off)
@@ -729,6 +757,37 @@ static void costruisci_recinto(motore_t *m)
     m->n_recinto = taken;
 }
 
+/*
+ * La guarigione: se compatta e' cascata dopo lo swap, i derivati sono
+ * stantii ma l'arena e' verita' integra — e ogni derivato nasce di novo
+ * da lei sola. La riparazione e' la stessa deriva del caricamento,
+ * rieseguita: se la memoria manca ancora, il guasto RESTA dichiarato e
+ * la chiamata fallisce ad alta voce (mai servire i derivati stantii).
+ */
+static int ripara(motore_t *m)
+{
+    if (!m->guasto)
+        return MOTORE_OK;
+    if (bloom_ridimensiona(m, 10 * (m->n_entry ? m->n_entry : 1024))
+            != MOTORE_OK)
+        return MOTORE_ERR_MEMORIA;
+    if (deriva_db(m) != MOTORE_OK)
+        return MOTORE_ERR_MEMORIA;      /* il guasto resta marcato   */
+    costruisci_recinto(m);
+    m->guasto = 0;
+    return MOTORE_OK;
+}
+
+#ifdef MOTORE_COLLAUDO
+/* gancio SOLO del banco: simula i derivati stantii senza aspettare un
+ * OOM vero (l'iniezione e' dichiarata come il guasto che provoca) */
+void motore_collaudo_guasto(motore_t *m) { m->guasto = 1; }
+
+/* gancio SOLO del banco n.2: la PROSSIMA put cade con finto OOM — per
+ * provare la compensazione del layer MCP senza un'arena piena vera */
+int motore_collaudo_rifiuta_put = 0;
+#endif
+
 /* ------------------------------------------------ la vita del motore */
 
 static motore_t *alloca_motore(size_t stima_voci)
@@ -801,6 +860,17 @@ void motore_chiudi(motore_t *m)
 int motore_put(motore_t *m, const char *chiave, size_t klen,
                const char *valore, size_t vlen, uint32_t ttl)
 {
+#ifdef MOTORE_COLLAUDO
+    extern int motore_collaudo_rifiuta_put;
+    if (motore_collaudo_rifiuta_put) {
+        motore_collaudo_rifiuta_put = 0;     /* finta OOM, una volta:
+                                              * SOLO il banco            */
+        return MOTORE_ERR_MEMORIA;
+    }
+#endif
+    int r_g = ripara(m);                 /* un controllo solo [guasto] */
+    if (r_g != MOTORE_OK)
+        return r_g;
     if (ttl > N_TICK)
         return MOTORE_ERR_TTL;           /* finestra dell'anello [I8] */
 
@@ -834,6 +904,9 @@ int motore_put(motore_t *m, const char *chiave, size_t klen,
 const uint8_t *motore_get(motore_t *m, const char *chiave, size_t klen,
                           uint32_t *valore_len)
 {
+    if (ripara(m) != MOTORE_OK)          /* mai servire i derivati
+                                          * stantii: il get e' muto    */
+        return NULL;
     /* la porta del "certamente no" [I9]: mai un falso negativo */
     if (!bloom_contiene(m, chiave, klen)) {
         m->sonde_risparmiate++;
@@ -860,6 +933,9 @@ const uint8_t *motore_get(motore_t *m, const char *chiave, size_t klen,
 
 int motore_del(motore_t *m, const char *chiave, size_t klen)
 {
+    int r_g = ripara(m);                 /* un controllo solo [guasto] */
+    if (r_g != MOTORE_OK)
+        return r_g;
     int trovata;
     size_t idx = trova_slot(m, calcolo_hash(chiave, klen), chiave, klen, &trovata);
     if (!trovata)
@@ -875,6 +951,10 @@ int motore_del(motore_t *m, const char *chiave, size_t klen)
 
 void motore_avanza(motore_t *m, uint32_t adesso)
 {
+    if (ripara(m) != MOTORE_OK)          /* l'anello legge le voci:
+                                          * stantie, sparerebbe a id
+                                          * che non rispondono piu'    */
+        return;
     if (adesso < m->adesso)
         return;                          /* l'orologio non torna indietro */
     while (m->adesso < adesso) {
@@ -919,6 +999,13 @@ uint32_t motore_adesso(const motore_t *m) { return m->adesso; }
 
 int motore_presente(motore_t *m, const char *chiave, size_t klen)
 {
+    if (ripara(m) != MOTORE_OK)          /* un bloom stantio potrebbe
+                                          * dire "no" a un vivo: il "no"
+                                          * e' certo solo colla certezza.
+                                          * Su guasto irrisanabile si dice
+                                          * "probabilmente": falso
+                                          * positivo, mai [I9] rotto    */
+        return 1;
     return bloom_contiene(m, chiave, klen);
 }
 
@@ -948,6 +1035,12 @@ static int cmp_off_chiave(const void *pa, const void *pb)
  */
 int motore_compatta(motore_t *m)
 {
+    int r_g = ripara(m);                 /* un controllo solo [guasto]:
+                                          * offsets si stima su n_entry,
+                                          * e un n_entry stantio e' una
+                                          * stima bugiarda             */
+    if (r_g != MOTORE_OK)
+        return r_g;
     uint32_t *offsets = malloc((m->n_entry + 1) * sizeof *offsets);
     if (!offsets)
         return MOTORE_ERR_MEMORIA;
@@ -957,9 +1050,7 @@ int motore_compatta(motore_t *m)
         const uint8_t *e = m->data + off;
         size_t dim = entry_dim(e);
         if (!entry_morta(e)) {
-            uint32_t ttl  = leggi_u32(e + 12);
-            uint32_t nato = leggi_u32(e + 16) & ~MORTA_BIT;
-            if (ttl == 0 || (uint32_t)(m->adesso - nato) < ttl) {
+            if (!entry_scaduta(m, e)) {
                 offsets[vive++] = (uint32_t)off;
             }
         }
@@ -991,9 +1082,13 @@ int motore_compatta(motore_t *m)
     m->ordinato_fino = nu;               /* l'arena intera e' ordinata */
 
     if (bloom_ridimensiona(m, 10 * (vive ? vive : 1024)) != MOTORE_OK)
-        return MOTORE_ERR_MEMORIA;
+        { m->guasto = 1;          /* lo swap e' avvenuto: i derivati
+                                   * non tornano, si dichiara e si
+                                   * guarisce alla prossima porta     */
+          return MOTORE_ERR_MEMORIA; }
     if (deriva_db(m) != MOTORE_OK)
-        return MOTORE_ERR_MEMORIA;
+        { m->guasto = 1;
+          return MOTORE_ERR_MEMORIA; }
     costruisci_recinto(m);
     return MOTORE_OK;
 }
@@ -1230,6 +1325,10 @@ motore_t *motore_apri_da(const char *nome, uint32_t adesso, size_t *scartate)
 size_t motore_chiedi(motore_t *m, const char *query, size_t qlen,
                      size_t k, motore_risposta_t out[], size_t *n_candidati)
 {
+    if (ripara(m) != MOTORE_OK)          /* l'indice semantico e'
+                                          * derivato puro: stantio,
+                                          * risponde a vanvera        */
+        return 0;
     if (k > TOPLIM)
         k = TOPLIM;
     if (k == 0)
@@ -1324,6 +1423,11 @@ size_t motore_intervallo(motore_t *m, const char *da, size_t da_len,
                          motore_risposta_t out[], size_t *totali,
                          uint32_t *passi_seek)
 {
+    if (ripara(m) != MOTORE_OK)          /* il recinto e' derivato: un
+                                          * campione stantio porterebbe
+                                          * la passeggiata a partire
+                                          * dal punto sbagliato       */
+        return 0;
     size_t tot = 0, riempite = 0, passi = 0;
 
     /* range rovesciato: le passeggiate lo scoprirebbero da sole,
@@ -1337,7 +1441,7 @@ size_t motore_intervallo(motore_t *m, const char *da, size_t da_len,
         const uint8_t *e = m->data + off;
         if (confronta_chiave(e, a, a_len) > 0)
             break;                       /* ordine: stop garantito     */
-        if (!entry_morta(e) &&
+        if (!entry_morta(e) && !entry_scaduta(m, e) &&
             confronta_chiave(e, da, da_len) >= 0) {
             tot++;
             if (riempite < k_max) {
@@ -1357,7 +1461,7 @@ size_t motore_intervallo(motore_t *m, const char *da, size_t da_len,
     off = m->ordinato_fino;
     while (off < m->usato) {
         const uint8_t *e = m->data + off;
-        if (!entry_morta(e) &&
+        if (!entry_morta(e) && !entry_scaduta(m, e) &&
             confronta_chiave(e, a, a_len) <= 0 &&
             confronta_chiave(e, da, da_len) >= 0) {
             tot++;
@@ -1388,9 +1492,18 @@ size_t motore_intervallo(motore_t *m, const char *da, size_t da_len,
  * verita' (l'arena) e le confronta col contatore che ogni morte ha
  * aggiornato. Se questi due numeri divergono, o una morte non ha
  * lasciato il segno (rompe [I7]) o un contatore mente (rompe [I3]).
+ * L'audit ora guarisce prima (un n_entry stantio dichiarerebbe bugia):
+ * il costo del const e' stato pagato volentieri, l'onestà costa di
+ * piu'. Su guasto irrisanabile torna (size_t)-1 a tutte e due le uscite:
+ * mai dare "0 == 0" per verde.
  */
-size_t motore_audit(const motore_t *m, size_t *dichiarate)
+size_t motore_audit(motore_t *m, size_t *dichiarate)
 {
+    if (ripara(m) != MOTORE_OK) {
+        if (dichiarate)
+            *dichiarate = (size_t)-1;
+        return (size_t)-1;
+    }
     size_t vive = 0, off = 0;
     while (off < m->usato) {
         const uint8_t *e = m->data + off;
@@ -1407,6 +1520,10 @@ size_t motore_audit(const motore_t *m, size_t *dichiarate)
 
 void motore_statistiche(const motore_t *m, const char *etichetta)
 {
+    if (m->guasto)
+        fprintf(stderr, "%-14s GUASTO DICHIARATO: i derivati sono stantii,"
+                " l'arena e' verita' integra: le cifre di sotto sono"
+                " veterane, non bugie fresche\n", etichetta);
     double mn = m->n_voci ? (double)m->bloom_m / (double)m->n_voci : 0.0;
     fprintf(stderr, "%-14s %8zu byte, %6zu spazzatura (%4.1f%%), %5zu vive, %5zu voci, "
            "%6zu slot (LF %2.0f%%), ordine %s (%zu/%zu, recinto %zu), "

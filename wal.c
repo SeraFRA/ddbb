@@ -34,6 +34,8 @@
 struct wal {
     FILE *f;
     char *percorso;      /* serve al taglio: riapre dopo la creazione */
+    int rotto;           /* 1 = il rollback non e' passato: scrivere e'
+                          * vietato, il confine dei record e' veleno */
 };
 
 /* ------------------------------------------------------------- CRC-32 */
@@ -142,6 +144,7 @@ wal_t *wal_apri(const char *percorso)
         { fclose(f); free(w); return NULL; }
     memcpy(w->percorso, percorso, n + 1);
     w->f = f;
+    w->rotto = 0;
     return w;
 }
 
@@ -149,19 +152,73 @@ void wal_chiudi(wal_t *w)
 {
     if (!w)
         return;
-    fclose(w->f);
+    if (w->f)
+        fclose(w->f);     /* rotto con il FILE gia' chiuso: si paga qui */
     free(w->percorso);
     free(w);
 }
 
 /* il trittico [W2]: fwrite + fflush + fsync. Il record e' inchiostrato
  * solo quando fsync torna: prima di allora vale il prefisso sicuro */
+
+#ifdef WAL_COLLAUDO
+/* l'iniettore SOLO del banco: -1 = nessuna; N = la fwrite numero N
+ * (dall'avvio del processo) ritorna corta SENZA scrivere — per provare
+ * il rollback senza aspettare un disco pieno vero. */
+int wal_collaudo_monca_il_valore = 0;  /* 1 = la PROSSIMA put con valore
+                                        * muore sulla fwrite del valore */
+#endif
+
+/* la fwrite con l'iniettore dentro: 1 intera, 0 corta */
+static int fw_scrivi(wal_t *w, const void *p, size_t n)
+{
+    return fwrite(p, 1, n, w->f) == n;
+}
+
+/*
+ * La ritirata [W3]. POST MORTEM (review, giro del 22-11): una fwrite
+ * corta o un fflush caduto lasciavano il record monco A TERRA nel
+ * file; la put successiva appendeva dietro e il confine dei record
+ * marciva: al replay la coda illeggibile troncava via anche i record
+ * durabili scritti dopo. Ora la scrittura fallita torna INDIETRO:
+ * il confine il tronca lo rimette dov'era, e lo stdio si riapre perche'
+ * in pancia porta ancora i byte che non sono piu' sul disco. Se nemmeno
+ * il rollback passa, il WAL si dichiara ROTTO: da li' ogni scrittura
+ * si rifiuta — meglio un WAL fermo che un confine al veleno.
+ */
+static int wal_rollback(wal_t *w, long prima)
+{
+    fflush(w->f);                      /* best effort: quel che riesce a
+                                        * scendere, il tronca lo rimuove  */
+    if (tronca(w->f, prima) == 0) {
+        FILE *nuovo = NULL;
+        if (fclose(w->f) == 0) {
+            w->f = NULL;
+            nuovo = fopen(w->percorso, "ab+");
+            if (nuovo && fseek(nuovo, prima, SEEK_SET) == 0) {
+                w->f = nuovo;
+                if (sincronizza(fileno(w->f)) == 0)
+                    return WAL_ERR_IO;  /* put caduta, confine SALVO    */
+                fclose(w->f);           /* taglio non durabile          */
+                w->f = NULL;
+            } else if (nuovo) {
+                fclose(nuovo);
+            }
+        }
+    }
+    w->rotto = 1;                      /* dichiarato, non taciuto       */
+    return WAL_ERR_IO;                 /* WAL zoppo: mai piu' append   */
+}
+
 static int wal_scrivi(wal_t *w, uint8_t op, const char *chiave, size_t klen,
                       const char *valore, size_t vlen,
                       uint32_t ttl, uint32_t tick)
 {
     if (klen > 0xFFFFFFFFu || vlen > 0xFFFFFFFFu)
         return WAL_ERR_FORMATO;         /* l'header e' u32: il resto e' bugia */
+    if (w->rotto)
+        return WAL_ERR_IO;             /* confine marcio: si rifiuta e si
+                                        * dichiara, non si lenisce       */
 
     uint8_t h[WAL_HEADER];
     scrivi_u32(h + 0, (uint32_t)klen);
@@ -177,12 +234,25 @@ static int wal_scrivi(wal_t *w, uint8_t op, const char *chiave, size_t klen,
         s = crc32_aggiorna(s, (const uint8_t *)valore, vlen);
     scrivi_u32(h + 17, crc32_fine(s));
 
-    if (fwrite(h, 1, sizeof h, w->f) != sizeof h ||
-        fwrite(chiave, 1, klen, w->f) != klen ||
-        (vlen && fwrite(valore, 1, vlen, w->f) != vlen))
-        return WAL_ERR_IO;
+    long prima = ftell(w->f);
+    if (prima < 0)
+        return WAL_ERR_IO;             /* niente punto di partenza:
+                                        * niente nemmeno la ritirata    */
+
+    int monca = 0;
+#ifdef WAL_COLLAUDO
+    if (wal_collaudo_monca_il_valore) {
+        wal_collaudo_monca_il_valore = 0;   /* il banco finge il disco
+                                             * pieno: una volta sola    */
+        monca = 1;
+    }
+#endif
+    if (!fw_scrivi(w, h, sizeof h) ||
+        !fw_scrivi(w, chiave, klen) ||
+        (vlen && (monca || !fw_scrivi(w, valore, vlen))))
+        return wal_rollback(w, prima);
     if (fflush(w->f) != 0 || sincronizza(fileno(w->f)) != 0)
-        return WAL_ERR_IO;              /* il trittico, non il solo fsync */
+        return wal_rollback(w, prima); /* il trittico, non il solo fsync */
     return WAL_OK;
 }
 
@@ -199,6 +269,11 @@ int wal_del(wal_t *w, const char *chiave, size_t klen, uint32_t tick)
 
 int wal_taglia(wal_t *w)
 {
+    if (!w->f)                          /* rollback caduto col FILE in
+                                         * mano: gia' chiuso, gia' rotto */
+        return WAL_ERR_IO;
+    if (w->rotto)
+        return WAL_ERR_IO;
     if (fflush(w->f) != 0)
         return WAL_ERR_IO;
     if (tronca(w->f, 0) != 0)
@@ -214,6 +289,9 @@ size_t wal_riavvolgi(wal_t *w, motore_t *m, size_t *scartati)
 {
     if (scartati)
         *scartati = 0;
+    if (!w->f)
+        return (size_t)-1;              /* rotto col FILE chiuso: non c'e'
+                                          * storia da rileggere qui       */
     if (fseek(w->f, 0, SEEK_END) != 0)
         return (size_t)-1;
     long dim = ftell(w->f);

@@ -875,6 +875,63 @@ int main(void)
                " — nessun salva in mezzo\n");
         json_libera(p);
     }
+#ifdef MOTORE_COLLAUDO
+    /* ---- [M9] la put rifiutata non risorge: la compensazione tira
+     * l'intenzione fuori dal WAL (i rossi della review, giro 22-11) */
+    printf("[M9] la put che il motore rifiuta non risorge dal"
+           " WAL...\n");
+    {
+        mcp_chiudi(s);                    /* crash: resta il WAL        */
+        s = mcp_apri("banco_mcp.db", 0, NULL);
+        if (!s) {
+            fprintf(stderr, "GATE ROTTO: il ricaricato non apre\n");
+            return 1;
+        }
+        jval_t *p = tool(s, "put",
+                         "{\"chiave\":\"viva/compensata\",\"valore\":\"resta\"}");
+        if (!e_vero(p, "scritto")) {
+            fprintf(stderr, "GATE ROTTO: la put viva non scrive\n");
+            return 1;
+        }
+        json_libera(p);
+        motore_collaudo_rifiuta_put = 1;  /* il banco finge l'OOM      */
+        int ie = 0;
+        jval_t *rifiutata = tool_e(s, "put",
+                                   "{\"chiave\":\"veleno/risorta\","
+                                   "\"valore\":\"non-doveva\"}", &ie);
+        if (!ie) {
+            fprintf(stderr, "GATE [M9] ROTTO: la put doveva cadere"
+                            " e ha risposto viva\n");
+            return 1;
+        }
+        json_libera(rifiutata);
+        mcp_chiudi(s);                    /* il secondo crash: il WAL
+                                           * ha put+del del veleno     */
+        s = mcp_apri("banco_mcp.db", 0, NULL);
+        if (!s) {
+            fprintf(stderr, "GATE ROTTO: il ricaricato non apre\n");
+            return 1;
+        }
+        p = tool(s, "get", "{\"chiave\":\"veleno/risorta\"}");
+        if (p->tipo != J_NULL) {
+            fprintf(stderr, "GATE [M9] ROTTO: la put rifiutata e'"
+                            " RISORTA dal replay: il WAL custodiva"
+                            " il veleno\n");
+            return 1;
+        }
+        json_libera(p);
+        p = tool(s, "get", "{\"chiave\":\"viva/compensata\"}");
+        const char *vc = json_str(json_get(p, "valore"), &vl);
+        if (!vc || strcmp(vc, "resta") != 0) {
+            fprintf(stderr, "GATE [M9] ROTTO: la viva e' sparita"
+                            " nella compensazione altrui\n");
+            return 1;
+        }
+        json_libera(p);
+        printf("     la caduta e' compensata: il replay resuscita"
+               " solo cio' che il vivo aveva accettato\n");
+    }
+#endif
     /* ---- [I11] il db ha un solo padrone, e lo dice */
     printf("[I11] il padrone: un secondo opener sullo stesso db"
            " deve cadere ad alta voce...\n");

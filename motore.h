@@ -95,9 +95,21 @@ size_t motore_intervallo(motore_t *m, const char *da, size_t da_len,
                          uint32_t *passi_seek);
 
 /* l'invariante [I7] resa API: conta le vive camminando l'arena e le
- * confronta col contatore interno. Divergenza = contratto rotto */
-size_t motore_audit(const motore_t *m, size_t *dichiarate);
+ * confronta col contatore interno. Divergenza = contratto rotto.
+ * Guarisce il motore prima (un contatore stantio sara' bugia): su
+ * guasto irrisanabile torna (size_t)-1 su TUTTE le uscite. */
+size_t motore_audit(motore_t *m, size_t *dichiarate);
 
 void motore_statistiche(const motore_t *m, const char *etichetta);
+
+#ifdef MOTORE_COLLAUDO
+/* SOLO il banco (ci.yml lo accende nel collaudo ASan): inietta il
+ * protocollo del danno — derivati stantii, arena integra — per provare
+ * la guarigione senza aspettare un OOM vero. */
+void motore_collaudo_guasto(motore_t *m);
+/* gancio n.2: 1 = la PROSSIMA put cade con finto OOM, una volta sola.
+ * Per provare la compensazione del layer MCP senza l'arena piena. */
+extern int motore_collaudo_rifiuta_put;
+#endif
 
 #endif /* MOTORE_H */

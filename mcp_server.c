@@ -514,7 +514,24 @@ static int tool_put(mcp_t *s, const jval_t *arg, jbuf_t *out)
     }
     int r = motore_put(s->mo, chiave, kl, valore, vl, (uint32_t)ttl);
     if (r != MOTORE_OK) {
-        payload_errore(out, r, msg_motore(r));
+        /* POST MORTEM (review, giro del 22-11): il record restava nel
+         * WAL nonostante il motore rifiutasse, e al replay la put
+         * risorgeva: stato dichiarato != stato durabile. Compensazione:
+         * l'intenzione si ritira dal log (una del dopo la cancella).
+         * Limite dichiarato: se la chiave era VIVA col vecchio valore,
+         * la compensazione la seppellisce — nel mondo dell'OOM in cui
+         * tutto questo vive, il veleno nel log sarebbe peggio. Se la
+         * compensazione stessa cade, il WAL e' gia' rotto per conto
+         * suo (wal_rollback) e ogni prossima put si rifiuta ad alta
+         * voce: mai piu' veleno silenzioso. */
+        if (s->wal &&
+                wal_del(s->wal, chiave, kl, motore_adesso(s->mo)) != WAL_OK)
+            payload_errore(out, MOTORE_ERR_IO,
+                           "put rifiutata E la compensazione caduta:"
+                           " il WAL e' compromesso, da qui ogni"
+                           " scrittura si rifiuta");
+        else
+            payload_errore(out, r, msg_motore(r));
         return 1;
     }
     JBUF_LIT(out, "{\"scritto\":true,\"ttl\":");
@@ -647,6 +664,13 @@ static int tool_del(mcp_t *s, const jval_t *arg, jbuf_t *out)
         payload_errore(out, -32602, "serve chiave (stringa)");
         return 1;
     }
+    /* la vittima si fotografa PRIMA (la get e' a costo ~zero): se il
+     * motore poi rifiuta per memoria, la compensazione la rimette nel
+     * log — il TTL si perde, limite dichiarato del mondo-OOM. Per la
+     * MANCA non serve nulla: il DEL di una chiave assente al replay e'
+     * legale per contratto [W5]. */
+    uint32_t vl_vecchia = 0;
+    const uint8_t *vecchio = motore_get(s->mo, chiave, kl, &vl_vecchia);
     /* il tombstone si inchiostra prima [W1]; al replay il DEL di una
      * chiave assente e' legale: puo' essere scaduta per conto suo [W5] */
     if (s->wal && wal_del(s->wal, chiave, kl,
@@ -657,7 +681,26 @@ static int tool_del(mcp_t *s, const jval_t *arg, jbuf_t *out)
     }
     int r = motore_del(s->mo, chiave, kl);
     if (r != MOTORE_OK) {
-        payload_errore(out, r, msg_motore(r));
+        if (r == MOTORE_ERR_MANCA || !vecchio) {
+            payload_errore(out, r, msg_motore(r));
+            return 1;                  /* assente: il replay fa lo
+                                          * stesso, legale [W5]         */
+        }
+        /* POST MORTEM (review, rossi del 22-11, il gemello della put):
+         * senza compensazione, il replay uccideva cio' che il vivo
+         * aveva risparmiato — la fotografia va rinchiostrata. Se pure
+         * la compensazione cade, il WAL e' rotto per conto suo e ogni
+         * prossima scrittura si rifiuta ad alta voce. */
+        if (s->wal &&
+                wal_put(s->wal, chiave, kl, (const char *)vecchio,
+                        vl_vecchia, 0,
+                        motore_adesso(s->mo)) == WAL_OK)
+            payload_errore(out, r, msg_motore(r));
+        else
+            payload_errore(out, MOTORE_ERR_IO,
+                          "delete rifiutata E la compensazione caduta:"
+                          " il WAL e' compromesso, da qui ogni"
+                          " scrittura si rifiuta");
         return 1;
     }
     JBUF_LIT(out, "{\"cancellata\":true}");

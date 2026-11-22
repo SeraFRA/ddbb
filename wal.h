@@ -128,4 +128,11 @@ size_t wal_riavvolgi(wal_t *w, motore_t *m, size_t *scartati);
  * il file, sempre — nessun contatore in memoria da far divergere */
 void wal_bilancio(wal_t *w, size_t *byte, size_t *record);
 
+#ifdef WAL_COLLAUDO
+/* SOLO il banco (ci.yml lo accende nel collaudo ASan): 1 = la PROSSIMA
+ * wal_put con valore muore sulla fwrite del valore, una volta sola —
+ * per provare la ritirata del confine [W3] senza un disco pieno vero. */
+extern int wal_collaudo_monca_il_valore;
+#endif
+
 #endif /* WAL_H */

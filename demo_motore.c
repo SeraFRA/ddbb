@@ -937,6 +937,122 @@ static int autotest(void)
         remove("prova_atomica.db.tmp");
     }
 
+    /* I: nessun lettore mente sulla scaduta [I8]. La morte resta pigra
+     * e UNA [I3] (la spara la ruota, al tick): ma quando il confine e'
+     * passato, get e intervallo devono darle lo stesso verdetto. */
+    {
+        motore_t *v = motore_apri();
+        if (!v) {
+            printf("autotest FALLITO [I]: apri\n");
+            errori++;
+        } else {
+            motore_put(v, "viva/alpha", 10, "1", 1, 100);
+            motore_put(v, "viva/beta",   9, "2", 1, 5);    /* muore al 5 */
+            motore_put(v, "viva/gamma", 10, "3", 1, 0);    /* eterna     */
+            motore_avanza(v, 4);                           /* tutte vive */
+            motore_risposta_t ris[8];
+            size_t tot = 0;
+            motore_intervallo(v, "viva/", 5, "viva0", 6, 8, ris, &tot, NULL);
+            if (tot != 3) {
+                printf("autotest FALLITO [I]: prima del termine"
+                       " l'intervallo conta %zu vive (attese 3)\n", tot);
+                errori++;
+            }
+            motore_avanza(v, 5);                           /* beta muore */
+            motore_intervallo(v, "viva/", 5, "viva0", 6, 8, ris, &tot, NULL);
+            uint32_t dl = 0;
+            if (!errori && tot == 2 &&
+                motore_get(v, "viva/beta", 9, &dl) == NULL) {
+                printf("autotest [I]: dopo il termine intervallo e get"
+                       " dicono entrambe morta: OK\n");
+            } else {
+                printf("autotest FALLITO [I]: dopo il termine totale=%zu"
+                       " (atteso 2) o get che la da viva: %d\n",
+                       tot, errori);
+                errori++;
+            }
+            motore_chiudi(v);
+        }
+    }
+
+    /* J: i fantasmi non bloccano la tabella [I7]. Il post mortem del
+     * 21-11: le morti pigre tengono lo slot, la crescita contava solo
+     * n_entry+n_tomb e una raffica di ttl=1 riempiva la tabella di
+     * fantasmi col load-factor cieco — trova_slot girava per sempre.
+     * Ora n_fantasma conta: la raffica passa e l'audit resta coerente. */
+    {
+        motore_t *v = motore_apri();
+        if (!v) {
+            printf("autotest FALLITO [J]: apri\n");
+            errori++;
+        } else {
+            int ok = 1;
+            for (uint32_t i = 0; i < 3000 && ok; i++) {
+                static char kf[24], vf[8];
+                snprintf(kf, sizeof kf, "fantasma/%05u", i);
+                snprintf(vf, sizeof vf, "v%03u", i);
+                if (motore_put(v, kf, strlen(kf), vf, strlen(vf), 1) != MOTORE_OK)
+                    ok = 0;
+            }
+            motore_avanza(v, 2);          /* tutte scadute: solo fantasmi */
+            for (uint32_t i = 0; i < 2000 && ok; i++) {
+                static char kn[24];
+                snprintf(kn, sizeof kn, "fresco/%05u", i);
+                if (motore_put(v, kn, strlen(kn), "nuovo", 4, 0) != MOTORE_OK)
+                    ok = 0;
+            }
+            size_t dic = 0, con = motore_audit(v, &dic);
+            if (ok && con == 2000 && dic == 2000) {
+                printf("autotest [J]: 3000 fantasmi, 2000 fresche"
+                       " senza impantanarsi, audit 2000/2000: OK\n");
+            } else {
+                printf("autotest FALLITO [J]: ok=%d audit %zu/%zu"
+                       " (2000 attesi)\n", ok, con, dic);
+                errori++;
+            }
+            motore_chiudi(v);
+        }
+    }
+
+#ifdef MOTORE_COLLAUDO
+    /* K: il protocollo del danno. Inietta derivati stantii (come un
+     * compatta cascato dopo lo swap) su un motore VERO e pretende che
+     * ogni porta si ripari da sola dall'arena integra [I1] prima di
+     * rispondere — e che l'audit torni esatto. */
+    {
+        motore_t *v = motore_apri();
+        if (!v) {
+            printf("autotest FALLITO [K]: apri\n");
+            errori++;
+        } else {
+            motore_put(v, "danno/a", 7, "1", 1, 0);
+            motore_put(v, "danno/b", 7, "2", 1, 10);
+            motore_collaudo_guasto(v);   /* derivati stantii, arena OK */
+            /* put/get/intervallo guariscono per strada */
+            int ok = 1;
+            uint32_t dl = 0;
+            const uint8_t *g = motore_get(v, "danno/b", 7, &dl);
+            if (!g || dl != 1 || memcmp(g, "2", 1) != 0)
+                ok = 0;
+            if (motore_put(v, "danno/c", 7, "3", 1, 0) != MOTORE_OK)
+                ok = 0;
+            motore_risposta_t ris[8];
+            size_t tot = 0;
+            motore_intervallo(v, "danno/", 6, "danno0", 7, 8, ris, &tot, NULL);
+            size_t dic = 0, con = motore_audit(v, &dic);
+            if (!ok || tot != 3 || con != 3 || dic != 3) {
+                printf("autotest FALLITO [K]: get=%d put tot=%zu (3)"
+                       " audit %zu/%zu\n", !!g, tot, con, dic);
+                errori++;
+            } else {
+                printf("autotest [K]: guasto iniettato, tre porte"
+                       " guarite dall'arena, audit 3/3: OK\n");
+            }
+            motore_chiudi(v);
+        }
+    }
+#endif
+
     if (errori)
         return errori;
     remove("prova_m.db");

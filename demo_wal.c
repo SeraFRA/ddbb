@@ -469,6 +469,16 @@ int main(void)
         double trittico = p50(tw, N_PREZZO);
         printf("put nuda p50: %.2f us — put col trittico p50: %.2f us "
                "(fwrite + fflush + fsync)\n", nuda, trittico);
+        /* POST MORTEM (gemello del consuma, 21-11): il gate del prezzo
+         * e' un RAPPORTO fra una operazione CPU (la put nuda, che il
+         * sanitizer gonfia 2-5x) e una IO (il trittico, dove comanda
+         * fsync, che il sanitizer non goncia): sotto ASan il confronto
+         * e' sporco per costruzione. Allargare la soglia sarebbe
+         * tradimento (voltato il rapporto, passerebbe anche un fsync
+         * rubato): il prezzo si misura sul calendario onesto, quello
+         * del build nudo — che la CI fa girare nel passo "il banco
+         * nudo". Sotto sanitizer il gate tace e lo dichiara. */
+#if !defined(__SANITIZE_ADDRESS__)
         if (trittico >= 2.0 * nuda) {
             printf("[G8] VERDE: la durabilita' non e' gratis (ratio %.0fx); "
                    "a 200 put il WAL costa %.1f ms in tutto — il salva "
@@ -479,11 +489,82 @@ int main(void)
                    "put nuda: misura sospetta\n");
             gate = 1;
         }
+#else
+        printf("[G8] silenzioso sotto sanitizer: il prezzo si misura"
+               " sul calendario onesto (passo 'il banco nudo')\n");
+#endif
         free(tp);
         free(tw);
         wal_chiudi(w);
         motore_chiudi(m);
     }
+
+#ifdef WAL_COLLAUDO
+    /* -------------------------------- FASE 7: la ritirata [W3] */
+    printf("\n-- fase 7: il record monco non resta a terra [W3] --\n");
+    {
+        remove(SEGMENTO);
+        wal_t *w = wal_apri(SEGMENTO);
+        if (!w) {
+            printf("GATE ROTTO (fase 7): il segmento non apre\n");
+            ripulisci();
+            return 1;
+        }
+        wal_put(w, "ritirata/a", 10, "uno", 3, 0, 1);
+        wal_put(w, "ritirata/b", 10, "due", 3, 0, 1);
+        size_t byte_prima = 0, rec_prima = 0;
+        wal_bilancio(w, &byte_prima, &rec_prima);
+        wal_collaudo_monca_il_valore = 1;   /* la prossima muore a meta' */
+        int r = wal_put(w, "ritirata/c", 10, "tre-lungo-che-muore", 20, 0, 1);
+        size_t byte_dopo = 0, rec_dopo = 0;
+        wal_bilancio(w, &byte_dopo, &rec_dopo);
+        if (r != WAL_ERR_IO || byte_dopo != byte_prima ||
+                rec_dopo != rec_prima) {
+            printf("GATE ROTTO (fase 7): r=%d byte %zu->%zu"
+                   " record %zu->%zu (la put caduta deve lasciare"
+                   " tutto com'era)\n", r, byte_prima, byte_dopo,
+                   rec_prima, rec_dopo);
+            gate = 1;
+            wal_chiudi(w);               /* anche il ramo rosso paga il
+                                           * biglietto della chiusura   */
+        } else if (wal_put(w, "ritirata/d", 10, "quattro", 6, 0, 1)
+                   != WAL_OK) {
+            printf("GATE ROTTO (fase 7): il WAL non scrive piu'"
+                   " dopo la ritirata\n");
+            gate = 1;
+            wal_chiudi(w);
+        } else {
+            wal_chiudi(w);
+            motore_t *m = motore_apri();
+            motore_avanza(m, 1);
+            wal_t *w2 = wal_apri(SEGMENTO);
+            size_t sc = 0;
+            size_t n_appl = wal_riavvolgi(w2, m, &sc);
+            wal_chiudi(w2);
+            uint32_t dl = 0;
+            const uint8_t *v = motore_get(m, "ritirata/d", 10, &dl);
+            const uint8_t *morta = motore_get(m, "ritirata/c", 10, &dl);
+            size_t vive = 0, dic = 0;
+            vive = motore_audit(m, &dic);
+            /* la storia e' a, b e d: la c caduta non esiste (3 record,
+             * ero caduto nel contarla viva io per primo: il gate dice
+             * 4 e il banco, giusto, rispondeva 3)                        */
+            if (n_appl != 3 || !v || morta != NULL || sc != 0 ||
+                    vive != 3 || dic != 3) {
+                printf("GATE ROTTO (fase 7): replay %zu record"
+                       " (attesi 3), scartati %zu, audit %zu/%zu,"
+                       " d viva %d, c risorta %d\n",
+                       n_appl, sc, vive, dic, !!v, !!morta);
+                gate = 1;
+            } else {
+                printf("[G9] VERDE: la put caduta non lascia"
+                       " moncherini: il confine resta salvo e il"
+                       " replay riferisce la storia intera\n");
+            }
+            motore_chiudi(m);
+        }
+    }
+#endif
 
     ripulisci();
     if (gate) {
