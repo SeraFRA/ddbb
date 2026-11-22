@@ -61,21 +61,22 @@
 #define N_FILLER     200
 #define N_CAMPIONI   200
 
-/* POST MORTEM (CI del 21-11 su 87a6659): le soglie p99 del [MISURA] sono
- * sul calendario e il calendario, sotto i sanitizers, mente: il consuma
- * vale 2-5x perche' misura il sanitizer, non il software. Prova su una
- * macchina gemella del runner: bbab50c (verde su GitHub) cade a 2246 us,
- * 87a6659 cade a 4559 us -- lo stesso codice, capricci del processore. La
- * soglia giusta al regime giusto: x5 DICHIARATO sotto ASan (gcc che
- * accende __SANITIZE_ADDRESS__; l'UBSan viaggia sempre in coppia con lui
- * nella CI, basta un testimone), x1 nel build normale. Il gate NON si
- * spegne mai: una regressione algoritmica (un O(n^2) vero) sfonda il x5
- * come sfonderebbe lo x1; la custode delle soglie strette resta il run
- * senza sanitizers, che la CI gia' fa nel passo make. */
+/* POST MORTEM (CI del 21-11 su 87a6659, poi di nuovo su 1031c01): le
+ * soglie p99 del [MISURA] sono sul calendario e il calendario, sotto i
+ * sanitizers, mente: il consuma vale 2-10x e SIGMA run-to-run — sullo
+ * stesso gemello WSL lo stesso binario ha dato da 50 a 15220 us nel
+ * giro di dieci minuti, e il runner di GitHub e' una macchina in
+ * comunita' come lui. Il moltiplicatore x5 era un compromesso: e' la
+ * stessa lezione definitiva del gate del prezzo [G8] nel demo del WAL
+ * — IL CALENDARIO NON SI MISURA SOTTO SANITIZER, si tace e lo
+ * dichiara. La custode delle soglie strette e' il passo CI "il banco
+ * nudo gira" (build senza sanitizers, soglie piene, x1). I gate
+ * funzionali [P1]..[P9] restano accesi anche sotto sanitizer: loro
+ * non guardano l'orologio. */
 #if defined(__SANITIZE_ADDRESS__)
-#define SOGLIA_X 5.0
+#define MISURA_SILENZIO 1
 #else
-#define SOGLIA_X 1.0
+#define MISURA_SILENZIO 0
 #endif
 
 /* ----------------------------------------------------------- utilita' */
@@ -474,6 +475,18 @@ int main(void)
     /* ---- [P6] il bilancio in byte, end-to-end sul filo MCP */
     printf("[P6] il bilancio attraversa il filo: get colpisce,"
            " stat misura...\n");
+    /* POST MORTEM (mio, 22-11): il setup montava banco12.db sopra i
+     * residui della corsa precedente — un run caduto lasciava il
+     * WAL a terra, e il replay della corsa dopo RIAPPLICAVA i record
+     * della vittima nell'arena nuova: un fallimento ne avvelenava
+     * un altro (il [P9] l'ha beccato: "la solo-viva era gia' dentro").
+     * Il banco pulisce PRIMA di montare: le sue cose non si
+     * ereditano. */
+    remove("banco12.db");
+    remove("banco12.db.wal");
+    remove("banco12.db.lock");
+    remove("banco12.db.prefetch");
+    remove("banco12.staging");
     motore_t *mfile = motore_apri();
     if (!mfile) {
         fprintf(stderr, "memoria\n");
@@ -752,27 +765,36 @@ int main(void)
            p50, p99, PREFETCH_FINESTRE_MAX, PREFETCH_SOGLIA);
     printf("     consuma:  p50 %8.1f us  p99 %8.1f us\n", c50, c99);
     printf("     tocca:   p50 %8.1f us  p99 %8.1f us\n", k50, k99);
-    if (p99 >= 10000.0 * SOGLIA_X) {
+#if !MISURA_SILENZIO
+    if (p99 >= 10000.0) {
         fprintf(stderr, "GATE [MISURA] ROTTO: predici p99 %.1f us"
-                        " >= %.0f us\n", p99, 10000.0 * SOGLIA_X);
+                        " >= 10000 us\n", p99);
         return 1;
     }
-    if (c99 >= 2000.0 * SOGLIA_X) {
+    if (c99 >= 2000.0) {
         fprintf(stderr, "GATE [MISURA] ROTTO: consuma p99 %.1f us"
-                        " >= %.0f us\n", c99, 2000.0 * SOGLIA_X);
+                        " >= 2000 us\n", c99);
         return 1;
     }
-    if (k99 >= 20.0 * SOGLIA_X) {
+    if (k99 >= 20.0) {
         fprintf(stderr, "GATE [MISURA] ROTTO: tocca p99 %.1f us"
-                        " >= %.0f us\n", k99, 20.0 * SOGLIA_X);
+                        " >= 20 us\n", k99);
         return 1;
     }
+#else
+    printf("     [MISURA] silenziosa sotto sanitizer: le soglie strette"
+           " vivono nel passo 'il banco nudo' della CI (qui i numeri"
+           " restano stampati, il calendario mente in questo regime)\n");
+#endif
 
     prefetch_parcheggio_chiudi(p);
     prefetch_parcheggio_chiudi(pt);
     motore_chiudi(m);
     remove(staging);
     remove("banco12.db");
+    remove("banco12.db.wal");     /* anche lui: una corsa verde che
+                                   * lascia il WAL avvelena la prossima
+                                   * (la lezione di stamattina)         */
     remove("banco12.db.prefetch");
     remove("banco12.db.lock");
     remove("fake_session/journal/0000000000000001.jsonl");
