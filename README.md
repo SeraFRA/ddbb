@@ -222,6 +222,7 @@ demo_multiagente.c      # il banco multi-sessione: la gobba del cold start, [B1]
 gateway.h / gateway.c  # il gateway: la lavagna a un solo custode, [L1]..[L6]
 mcp_gateway.c           # il guscio-2: la porta TCP su 127.0.0.1
 demo_gateway.c          # il banco della lavagna: processi veri, socket veri, MISURA della porta
+studio-utilita.md       # lo studio d'utilita': quando serve, quanto aiuta, il confronto col mercato
 .vibe/hooks.toml       # l'hook montato: pre_agent, fail-open
 Makefile               # make motore_demo | make mcp_server | make <capitolo>
 .gitignore             # eseguibili e file di prova non entrano nel repo

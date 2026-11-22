@@ -221,6 +221,7 @@ demo_multiagente.c      # the multi-session bench: the cold-start hump, [B1]..[B
 gateway.h / gateway.c  # the gateway: the single-custode blackboard, [L1]..[L6]
 mcp_gateway.c           # shell-2: the TCP door on 127.0.0.1
 demo_gateway.c          # the blackboard bench: real processes, real sockets, door MEASUREMENT
+studio-utilita.md       # the utility study: when it helps, how much, the market comparison (Italian only)
 .vibe/hooks.toml       # the hook mounted: pre_agent, fail-open
 Makefile               # make motore_demo | make mcp_server | make <chapter>
 .gitignore             # binaries and test files stay out of the repo
