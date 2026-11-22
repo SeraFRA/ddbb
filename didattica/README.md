@@ -10,6 +10,8 @@ Progetto didattico per autodidatti: ogni file è un capitolo autonomo e compilab
 
 ## Come è nato: la collaborazione
 
+E il nome, prima di tutto: `ddbb` sono le iniziali di *database* raddoppiate — nato a caso, poi cresciuto un pochino tanto. All'autore piace la ripetizione: graficamente sembrano simpatici coniglietti. Un acronimo vero, prima o poi, lo si troverà; la porta resta aperta.
+
 Questo repo è anche il verbale di una collaborazione fra un autore umano e un'AI di programmazione (Mistral Vibe). La prima richiesta non è stata "sistemami il codice" ma *"dammi degli hint per il debug, fammi imparare qualcosa"*: il contratto era capire, non avere. Da lì il metodo, rimasto uguale per dieci capitoli:
 
 1. **l'autore porta la direzione come metafora** — mai come specifica;
