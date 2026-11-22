@@ -23,10 +23,10 @@ Le metafore sono state il vero motore del design. Le principali:
 
 | l'autore ha detto | tradotta in meccanica, è diventata | nel capitolo |
 |---|---|---|
-| "un dipendente che si ricorda dove mette i prodotti negli scaffali, e li trova grazie alla probabilità delle volte prima" | **indice learned**: la previsione della posizione sostituisce la partenza a caso; l'invariante è che chi cambia la sua "memoria" ricostruisce la tabella | `database_learned.c` |
-| "un database che si comporti come la memoria umana: ogni cosa collegata e vicina in uno spazio semantico probabilistico" | **MinHash + banding LSH**: lo spazio semantico è l'insieme dei bigrammi posizionali; due chiavi sono "vicine" se condividono pezzi; la probabilità d'incontro è la firma | `database_semantic.c` |
+| "un dipendente che si ricorda dove mette i prodotti negli scaffali, e li trova grazie alla probabilità delle volte prima" | **indice learned**: la previsione della posizione sostituisce la partenza a caso; l'invariante è che chi cambia la sua "memoria" ricostruisce la tabella | `didattica/database_learned.c` |
+| "un database che si comporti come la memoria umana: ogni cosa collegata e vicina in uno spazio semantico probabilistico" | **MinHash + banding LSH**: lo spazio semantico è l'insieme dei bigrammi posizionali; due chiavi sono "vicine" se condividono pezzi; la probabilità d'incontro è la firma | `didattica/database_semantic.c` |
 | "un db che non sia puramente determinista: dia risposte probabili, rispondendo alle domande con le sue entry" | la **confidenza dichiarata**: hit esatto → 1.0; refuso → top-k col valore, gruppo dei pari-merito quando la verità è ambigua, silenzio quando non c'è niente da dire | `db_chiedi` / `motore_chiedi` |
-| "i dati che scadono non vanno controllati a ogni lettura" | **timing wheel**: la scadenza smette di essere un calcolo e diventa un luogo dell'anello | `database_ring.c` |
+| "i dati che scadono non vanno controllati a ogni lettura" | **timing wheel**: la scadenza smette di essere un calcolo e diventa un luogo dell'anello | `didattica/database_ring.c` |
 
 Il punto onesto: l'AI ha proposto anche capitoli per conto suo (Bloom/quotient, persistenza), ma le intuizioni che hanno girato il progetto verso il probabilistico sono tutte dell'autore — ed è lì che sta il valore della collaborazione: le metafore umane hanno scelto **quali** tecniche meritavano di esistere, l'AI ha scelto **come** farle funzionare e ne ha pagato i bug, documentandoli.
 
@@ -40,16 +40,16 @@ Cosa ha insegnato, in una frase: una metafora umana più un test che sa fallire 
 
 | # | file | what's in it | nel mondo reale si chiama | il numero da ricordare |
 |---|------|--------------|---------------------------|------------------------|
-| 0 | `database.c` | il punto di partenza: array contiguo di entry, il codice originale con i suoi bug didattici — lasciato intonso: è il fossile | — | — |
-| 1 | `database_debug.c` | la prima sistemazione: bug di frontiera, strumenti di ispezione, marker `FIX` | debugging | — |
-| 2 | `database_indexed.c` | buffer append-only + indice hash | **Bitcask** (append-only log + hash in RAM) | get O(1), catene di probing |
-| 3 | `database_compact.c` | tombstone, compattazione O(n), percentili p50/p90/p99 | il **merge** degli LSM | la distribuzione batte la media |
-| 4 | `database_persist.c` | CRC-32 per entry, snapshot compattati, load validato: prefisso sicuro | checksum + snapshot (SQLite, RocksDB) | 1 byte corrotto = persa solo quell'entry |
-| 5 | `database_learned.c` | spline sulla CDF delle chiavi al posto dell'hash di partenza | **learned index** (Kraska 2017) | l'invariante: cambi la funzione di partenza → ricostruisci |
-| 6 | `database_semantic.c` | bigrammi posizionali + MinHash + banding LSH: il db che capisce i refusi | **MinHash/LSH** (Broder 1997) | refusi ripescati nel top-8, ambiguità dichiarata |
-| 7 | `database_ring.c` | la scadenza come LUOGO (anello di tick) + delete a backshift | **timing wheel** (kernel Linux) | scadenze in batch, O(1) ammortizzato |
-| 8 | `database_quotient.c` | Bloom e quotient filter, la contabilità dei bit | **Bloom 1970 / Bender 2012** | falsi positivi misurati 0.777% vs 0.82% di teoria |
-| 9 | `database_persist_semantic.c` | la fusione: la risposta semantica viene dal disco, col valore — con l'esperimento *invariants-first* | — | 0 sbagliate su 60000 verifiche dal disco |
+| 0 | `didattica/database.c` | il punto di partenza: array contiguo di entry, il codice originale con i suoi bug didattici — lasciato intonso: è il fossile | — | — |
+| 1 | `didattica/database_debug.c` | la prima sistemazione: bug di frontiera, strumenti di ispezione, marker `FIX` | debugging | — |
+| 2 | `didattica/database_indexed.c` | buffer append-only + indice hash | **Bitcask** (append-only log + hash in RAM) | get O(1), catene di probing |
+| 3 | `didattica/database_compact.c` | tombstone, compattazione O(n), percentili p50/p90/p99 | il **merge** degli LSM | la distribuzione batte la media |
+| 4 | `didattica/database_persist.c` | CRC-32 per entry, snapshot compattati, load validato: prefisso sicuro | checksum + snapshot (SQLite, RocksDB) | 1 byte corrotto = persa solo quell'entry |
+| 5 | `didattica/database_learned.c` | spline sulla CDF delle chiavi al posto dell'hash di partenza | **learned index** (Kraska 2017) | l'invariante: cambi la funzione di partenza → ricostruisci |
+| 6 | `didattica/database_semantic.c` | bigrammi posizionali + MinHash + banding LSH: il db che capisce i refusi | **MinHash/LSH** (Broder 1997) | refusi ripescati nel top-8, ambiguità dichiarata |
+| 7 | `didattica/database_ring.c` | la scadenza come LUOGO (anello di tick) + delete a backshift | **timing wheel** (kernel Linux) | scadenze in batch, O(1) ammortizzato |
+| 8 | `didattica/database_quotient.c` | Bloom e quotient filter, la contabilità dei bit | **Bloom 1970 / Bender 2012** | falsi positivi misurati 0.777% vs 0.82% di teoria |
+| 9 | `didattica/database_persist_semantic.c` | la fusione: la risposta semantica viene dal disco, col valore — con l'esperimento *invariants-first* | — | 0 sbagliate su 60000 verifiche dal disco |
 | 11 | `mcp_server.c` + `mcp_stdio.c` | il layer MCP: il motore come strumento per un agente LLM — 10 tool, confidenza sempre dichiarata, `presente` batch | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms del giro LLM |
 | 12 | `prefetch.c` + `prefetch_hook.c` | il prefetcher speculativo: un hook pre_agent legge la traccia dei pensieri dell'agente, predice le chiavi che serviranno e le parcheggia accanto al motore con TTL in richieste; il server MCP consuma lo staging e conta i colpi | **prefetch speculativo** (quello delle CPU, applicato all'IO dell'agente) | hit-rate 1.00 sul filo intero del banco, soglia 0.50 |
 | 13 | `wal.c` + `misura_fsync.c` | il write-ahead log: le intenzioni si inchiostrano una per una (fwrite+fflush+fsync) prima di toccare il motore; il replay ricostruisce tutto fra due snapshot, la coda marcia si tronca | **WAL** (Bitcask, Postgres, SQLite) | 216 µs per put durabile (p50), il replay è esatto: 212/212 |
@@ -205,8 +205,9 @@ Questo repo è anche un diario di come si impara a costruire cose che non si san
 ## Struttura
 
 ```
-database*.c            # i nove capitoli + l'originale: ognuno si compila da solo
-motore.h / motore.c    # il motore unico (API pubblica, handle opaco)
+didattica/database*.c  # il PERCORSO EDUCATIVO (chiuso): il fossile + i nove
+                       # capitoli, ognuno si compila da solo — documentazione
+motore.h / motore.c    # IL PRODOTTO, da qui in giu': l'engine unico (API pubblica, handle opaco)
 demo_motore.c          # il banco di prova: gate a ogni invariante
 json.h / json.c        # il parser JSON minimale: una fonte di verita' per il filo
 mcp_server.h / mcp_server.c  # il nucleo MCP: 10 tool, contratto [M1]..[M11]

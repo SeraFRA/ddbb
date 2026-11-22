@@ -62,8 +62,11 @@ demo_wal: demo_wal.c wal.c motore.c wal.h motore.h
 misura_fsync: misura_fsync.c
 	$(CC) $(CFLAGS) -o $@ misura_fsync.c $(LDLIBS)
 
-# i capitoli storici (esempi: make database_ring)
-%: %.c
+# i capitoli storici sono passati in didattica/: continuano a
+# compilarsi UNO PER VOLTA, dal loro scaffale — il target non cambia
+# nome (make database_ring come sempre), la regola pattern va a
+# prenderli dove stanno (esempi: make database_ring)
+%: didattica/%.c
 	$(CC) $(CFLAGS) -o $@ $< $(LDLIBS)
 
 clean:

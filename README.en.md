@@ -23,10 +23,10 @@ The metaphors were the real engine of the design. The main ones:
 
 | the author said | translated into mechanics, it became | in the chapter |
 |---|---|---|
-| "an employee who remembers where he puts the products on the shelves, and finds them thanks to the probability of the previous times" | **learned index**: position prediction replaces the random starting point; the invariant is that whoever changes his "memory" rebuilds the table | `database_learned.c` |
-| "a database that behaves like human memory: everything connected and close in a probabilistic semantic space" | **MinHash + LSH banding**: the semantic space is the set of positional bigrams; two keys are "close" when they share pieces; the probability of meeting is the signature | `database_semantic.c` |
+| "an employee who remembers where he puts the products on the shelves, and finds them thanks to the probability of the previous times" | **learned index**: position prediction replaces the random starting point; the invariant is that whoever changes his "memory" rebuilds the table | `didattica/database_learned.c` |
+| "a database that behaves like human memory: everything connected and close in a probabilistic semantic space" | **MinHash + LSH banding**: the semantic space is the set of positional bigrams; two keys are "close" when they share pieces; the probability of meeting is the signature | `didattica/database_semantic.c` |
 | "a db that is not purely deterministic: give probable answers, answering questions with its own entries" | **declared confidence**: exact hit → 1.0; typo → top-k with the value, a group of equals when the truth is ambiguous, silence when there is nothing to say | `db_chiedi` / `motore_chiedi` |
-| "expiring data should not be checked on every read" | **timing wheel**: expiry stops being a computation and becomes a place on the ring | `database_ring.c` |
+| "expiring data should not be checked on every read" | **timing wheel**: expiry stops being a computation and becomes a place on the ring | `didattica/database_ring.c` |
 
 The honest point: the AI proposed chapters on its own too (Bloom/quotient, persistence), but the intuitions that turned the project toward the probabilistic are all the author's — and that is where the value of the collaboration lies: human metaphors chose **which** techniques deserved to exist, the AI chose **how** to make them work and paid for their bugs, documenting them.
 
@@ -40,16 +40,16 @@ What it taught, in one sentence: a human metaphor plus a test that knows how to 
 
 | # | file | what's in it | the real world calls it | the number to remember |
 |---|------|--------------|---------------------------|------------------------|
-| 0 | `database.c` | the starting point: contiguous array of entries, the original code with its didactic bugs — left untouched: it is the fossil | — | — |
-| 1 | `database_debug.c` | the first cleanup: boundary bugs, inspection tools, `FIX` markers | debugging | — |
-| 2 | `database_indexed.c` | append-only buffer + hash index | **Bitcask** (append-only log + in-RAM hash) | O(1) get, probe chains |
-| 3 | `database_compact.c` | tombstones, O(n) compaction, p50/p90/p99 percentiles | the LSM **merge** | the distribution beats the average |
-| 4 | `database_persist.c` | CRC-32 per entry, compacted snapshots, validated load: safe prefix | checksum + snapshot (SQLite, RocksDB) | 1 corrupted byte = only that entry lost |
-| 5 | `database_learned.c` | a spline on the CDF of the keys instead of the hash as starting point | **learned index** (Kraska 2017) | the invariant: change the starting function → rebuild |
-| 6 | `database_semantic.c` | positional bigrams + MinHash + LSH banding: the db that understands typos | **MinHash/LSH** (Broder 1997) | typos recovered in the top-8, ambiguity declared |
-| 7 | `database_ring.c` | expiry as a PLACE (a ring of ticks) + backshift delete | **timing wheel** (Linux kernel) | batch expiries, amortized O(1) |
-| 8 | `database_quotient.c` | Bloom and quotient filter, the accounting of bits | **Bloom 1970 / Bender 2012** | false positives measured 0.777% vs 0.82% theory |
-| 9 | `database_persist_semantic.c` | the fusion: the semantic answer comes from disk, with the value — featuring the *invariants-first* experiment | — | 0 wrong out of 60000 disk verifications |
+| 0 | `didattica/database.c` | the starting point: contiguous array of entries, the original code with its didactic bugs — left untouched: it is the fossil | — | — |
+| 1 | `didattica/database_debug.c` | the first cleanup: boundary bugs, inspection tools, `FIX` markers | debugging | — |
+| 2 | `didattica/database_indexed.c` | append-only buffer + hash index | **Bitcask** (append-only log + in-RAM hash) | O(1) get, probe chains |
+| 3 | `didattica/database_compact.c` | tombstones, O(n) compaction, p50/p90/p99 percentiles | the LSM **merge** | the distribution beats the average |
+| 4 | `didattica/database_persist.c` | CRC-32 per entry, compacted snapshots, validated load: safe prefix | checksum + snapshot (SQLite, RocksDB) | 1 corrupted byte = only that entry lost |
+| 5 | `didattica/database_learned.c` | a spline on the CDF of the keys instead of the hash as starting point | **learned index** (Kraska 2017) | the invariant: change the starting function → rebuild |
+| 6 | `didattica/database_semantic.c` | positional bigrams + MinHash + LSH banding: the db that understands typos | **MinHash/LSH** (Broder 1997) | typos recovered in the top-8, ambiguity declared |
+| 7 | `didattica/database_ring.c` | expiry as a PLACE (a ring of ticks) + backshift delete | **timing wheel** (Linux kernel) | batch expiries, amortized O(1) |
+| 8 | `didattica/database_quotient.c` | Bloom and quotient filter, the accounting of bits | **Bloom 1970 / Bender 2012** | false positives measured 0.777% vs 0.82% theory |
+| 9 | `didattica/database_persist_semantic.c` | the fusion: the semantic answer comes from disk, with the value — featuring the *invariants-first* experiment | — | 0 wrong out of 60000 disk verifications |
 | 11 | `mcp_server.c` + `mcp_stdio.c` | the MCP layer: the engine as a tool for an LLM agent — 10 tools, confidence always declared, batch `presente` | **MCP** (Model Context Protocol) | get p99 2.3 µs vs 10²..10³ ms of the LLM round-trip |
 | 12 | `prefetch.c` + `prefetch_hook.c` | the speculative prefetcher: a pre_agent hook reads the agent's reasoning trace, predicts the keys it will need and stages them next to the engine with a TTL in requests; the MCP server consumes the staging and counts the hits | **speculative prefetch** (the CPU one, applied to the agent's IO) | hit-rate 1.00 on the bench's full wire, threshold 0.50 |
 | 13 | `wal.c` + `misura_fsync.c` | the write-ahead log: intents are inked one by one (fwrite+fflush+fsync) before touching the engine; the replay rebuilds everything between two snapshots, the rotten tail is truncated | **WAL** (Bitcask, Postgres, SQLite) | 216 µs per durable put (p50), the replay is exact: 212/212 |
@@ -204,8 +204,9 @@ This repo is also a diary of how one learns to build things one does not know ho
 ## Layout
 
 ```
-database*.c            # the nine chapters + the original: each builds alone
-motore.h / motore.c    # the single engine (public API, opaque handle)
+didattica/database*.c  # the EDUCATIONAL PATH (closed): the fossil + the nine
+                       # chapters, each builds alone — documentation
+motore.h / motore.c    # THE PRODUCT, from here down: the single engine (public API, opaque handle)
 demo_motore.c          # the test bench: a gate per invariant
 json.h / json.c        # the minimal JSON parser: one source of truth for the wire
 mcp_server.h / mcp_server.c  # the MCP core: 10 tools, contract [M1]..[M11]
