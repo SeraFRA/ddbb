@@ -118,3 +118,5 @@ Each builds alone, each is a bench. The metaphors that generated them — and ev
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+<!-- example test line for feat/test-pr: this comment exercises the PR flow -->
