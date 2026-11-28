@@ -43,3 +43,9 @@ demo_gateway
 # la ricerca di mercato dell'umano: scelta sua, resta SOLO in locale
 ricerca-mcp.md
 
+# il bot dell'umano che aiuta su questa repo: sviluppo e segreti
+# restano in locale, MAI nel repo
+.env
+bot_dev/
+*.log
+
